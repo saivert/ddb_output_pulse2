@@ -1,8 +1,6 @@
 /*
     PulseAudio output plugin for DeaDBeeF Player
-    Copyright (C) 2011 Jan D. Behrens <zykure@web.de>
-    Copyright (C) 2010-2012 Alexey Yakovenko <waker@users.sourceforge.net>
-    Copyright (C) 2010 Anton Novikov <tonn.post@gmail.com>
+    Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
