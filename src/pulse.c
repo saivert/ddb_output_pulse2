@@ -1,6 +1,8 @@
 /*
     PulseAudio output plugin for DeaDBeeF Player
-    Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>
+    Copyright (C) 2011 Jan D. Behrens <zykure@web.de>
+    Copyright (C) 2010-2012 Alexey Yakovenko <waker@users.sourceforge.net>
+    Copyright (C) 2010 Anton Novikov <tonn.post@gmail.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,41 +19,46 @@
 */
 
 #ifdef HAVE_CONFIG_H
-#  include "../config.h"
+#  include "../../config.h"
 #endif
 
-#include <pulse/pulseaudio.h>
+#include <pasimple.h>
 
+#include <stdint.h>
+#include <unistd.h>
+
+#ifdef __linux__
+    #include <sys/prctl.h>
+#endif
+
+#include <stdio.h>
 #include <string.h>
-#include <deadbeef/deadbeef.h>
+#include "../../deadbeef.h"
 
-#define trace(...) { fprintf(stdout, __VA_ARGS__); }
-//#define trace(fmt,...)
-#define FALSE (0)
-#define TRUE (1)
+//#define trace(...) { fprintf(stdout, __VA_ARGS__); }
+#define trace(fmt,...)
 
-DB_functions_t * deadbeef;
 static DB_output_t plugin;
+DB_functions_t * deadbeef;
 
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define PULSE_DEFAULT_BUFFERSIZE 4096
 
-static pa_context *context = NULL;
-static pa_stream *stream = NULL;
-static pa_threaded_mainloop *mainloop = NULL;
+static intptr_t pulse_tid;
+static int pulse_terminate;
 
-static pa_cvolume volume;
-static int volume_valid = FALSE;
-
-static int connected = FALSE;
-
+static pa_simple *s;
 static pa_sample_spec ss;
 static ddb_waveformat_t requested_fmt;
 static int state;
 static uintptr_t mutex;
 
 static int buffer_size;
+
+static void pulse_thread(void *context);
+
+static void pulse_callback(char *stream, int len);
 
 static int pulse_init();
 
@@ -66,145 +73,6 @@ static int pulse_stop();
 static int pulse_pause();
 
 static int pulse_unpause();
-
-
-
-
-#define CHECK_DEAD_GOTO(label, warn) do { \
-if (!mainloop || \
-    !context || pa_context_get_state(context) != PA_CONTEXT_READY || \
-    !stream || pa_stream_get_state(stream) != PA_STREAM_READY) { \
-        if (warn) \
-            trace("Connection died: %s\n", context ? pa_strerror(pa_context_errno(context)) : "null"); \
-        goto label; \
-    }  \
-} while(0);
-
-#define CHECK_CONNECTED(retval) \
-do { \
-    if (!connected) return retval; \
-} while (0);
-
-static void info_cb(struct pa_context *c, const struct pa_sink_input_info *i, int is_last, void *userdata) {
-    assert(c);
-
-    if (!i)
-        return;
-
-    volume = i->volume;
-    volume_valid = TRUE;
-
-    // Wrapping this in mutex lock doesn't work
-    deadbeef->volume_set_db(pa_sw_volume_to_dB(pa_cvolume_avg(&volume)));
-}
-
-static void subscribe_cb(struct pa_context *c, enum pa_subscription_event_type t, uint32_t index, void *userdata) {
-    pa_operation *o;
-
-    assert(c);
-
-    if (!stream ||
-        index != pa_stream_get_index(stream) ||
-        (t != (PA_SUBSCRIPTION_EVENT_SINK_INPUT|PA_SUBSCRIPTION_EVENT_CHANGE) &&
-         t != (PA_SUBSCRIPTION_EVENT_SINK_INPUT|PA_SUBSCRIPTION_EVENT_NEW)))
-        return;
-
-    if (!(o = pa_context_get_sink_input_info(c, index, info_cb, NULL))) {
-        trace("pa_context_get_sink_input_info() failed: %s\n", pa_strerror(pa_context_errno(c)));
-        return;
-    }
-
-    pa_operation_unref(o);
-}
-
-static void context_state_cb(pa_context *c, void *userdata) {
-    assert(c);
-
-    switch (pa_context_get_state(c)) {
-        case PA_CONTEXT_READY:
-        case PA_CONTEXT_TERMINATED:
-        case PA_CONTEXT_FAILED:
-            trace("Context error: %s", pa_strerror(pa_context_errno(c)));
-            pa_threaded_mainloop_signal(mainloop, 0);
-            break;
-
-        case PA_CONTEXT_UNCONNECTED:
-        case PA_CONTEXT_CONNECTING:
-        case PA_CONTEXT_AUTHORIZING:
-        case PA_CONTEXT_SETTING_NAME:
-            break;
-    }
-}
-
-static void stream_state_cb(pa_stream *s, void * userdata) {
-    assert(s);
-
-    switch (pa_stream_get_state(s)) {
-
-        case PA_STREAM_READY:
-        case PA_STREAM_FAILED:
-        case PA_STREAM_TERMINATED:
-            trace("Stream error: %s", pa_strerror(pa_context_errno(pa_stream_get_context(s))));
-            pa_threaded_mainloop_signal(mainloop, 0);
-            break;
-
-        case PA_STREAM_UNCONNECTED:
-        case PA_STREAM_CREATING:
-            break;
-    }
-}
-
-static void stream_success_cb(pa_stream *s, int success, void *userdata) {
-    assert(s);
-
-    if (userdata)
-        *(int*) userdata = success;
-
-    pa_threaded_mainloop_signal(mainloop, 0);
-}
-
-static void context_success_cb(pa_context *c, int success, void *userdata) {
-    assert(c);
-
-    if (userdata)
-        *(int*) userdata = success;
-
-    pa_threaded_mainloop_signal(mainloop, 0);
-}
-
-static void stream_request_cb(pa_stream *s, size_t length, void *userdata) {
-    assert(s);
-
-    //char *buffer;
-    size_t sz = 4096;
-    char buf[sz];
-
-    if (state == OUTPUT_STATE_PLAYING && deadbeef->streamer_ok_to_read (-1)) {
-        // pa_stream_begin_write(s, (void*)&buffer, &sz)
-        int len = deadbeef->streamer_read (buf, sz);
-        if (len) {
-
-            if (pa_stream_write(s, buf, len, NULL, 0, PA_SEEK_RELATIVE) < 0)
-            {
-                trace ("pa_stream_write() failed: %s\n", pa_strerror (pa_context_errno (context)));
-                goto fail;
-            }
-        } else {
-            trace("pa_stream_begin_write() failed");
-        }
-    }
-
-fail:
-    pa_threaded_mainloop_signal(mainloop, 0);
-}
-
-static void stream_latency_update_cb(pa_stream *s, void *userdata) {
-    assert(s);
-
-    pa_threaded_mainloop_signal(mainloop, 0);
-}
-
-
 
 static int pulse_set_spec(ddb_waveformat_t *fmt)
 {
@@ -253,141 +121,49 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         return -1;
     };
 
-
-
-    if (!pa_sample_spec_valid(&ss)) {
-        trace ("Sample spec invalid\n");
-        return FALSE;
+    if (s) {
+        pa_simple_free(s);
     }
 
-    if (!(mainloop = pa_threaded_mainloop_new())) {
-        trace ("Failed to allocate main loop\n");
-        return FALSE;
+    pa_buffer_attr * attr = NULL;
+    //attr->maxlength = Maximum length of the buffer.
+    //attr->tlength = Playback only: target length of the buffer.
+    //attr->prebuf = Playback only: pre-buffering.
+    //attr->minreq = Playback only: minimum request.
+    //attr->fragsize = Recording only: fragment size.
+
+    buffer_size = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
+
+    // TODO: where list of all available devices? add this option to config too..
+    char * dev = NULL;
+
+    int error;
+
+    // Read serveraddr from config
+    deadbeef->conf_lock ();
+    const char * server = deadbeef->conf_get_str_fast (CONFSTR_PULSE_SERVERADDR, NULL);
+
+    if (server) {
+        server = strcmp(server, "default") ? server : NULL;
     }
 
-    pa_threaded_mainloop_lock(mainloop);
+    s = pa_simple_new(server, "Deadbeef", PA_STREAM_PLAYBACK, dev, "Music", &ss, &channel_map, attr, &error);
+    deadbeef->conf_unlock ();
 
-    if (!(context = pa_context_new(pa_threaded_mainloop_get_api(mainloop), "DeaDBeeF"))) {
-        trace ("Failed to allocate context\n");
-        goto FAIL1;
-    }
-
-    pa_context_set_state_callback(context, context_state_cb, NULL);
-    pa_context_set_subscribe_callback(context, subscribe_cb, NULL);
-
-    if (pa_context_connect(context, NULL, (pa_context_flags_t) 0, NULL) < 0) {
-        trace ("Failed to connect to server: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL1;
-    }
-
-    if (pa_threaded_mainloop_start(mainloop) < 0) {
-        trace ("Failed to start main loop\n");
-        goto FAIL1;
-    }
-
-    /* Wait until the context is ready */
-    pa_threaded_mainloop_wait(mainloop);
-
-    if (pa_context_get_state(context) != PA_CONTEXT_READY) {
-        trace ("Failed to connect to server: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL1;
-    }
-
-    if (!(stream = pa_stream_new(context, "Music", &ss, &channel_map))) {
-        trace ("Failed to create stream: %s\n", pa_strerror(pa_context_errno(context)));
-
-FAIL1:
-        pa_threaded_mainloop_unlock (mainloop);
-        pulse_free ();
-        return FALSE;
-    }
-
-    pa_stream_set_state_callback(stream, stream_state_cb, NULL);
-    pa_stream_set_write_callback(stream, stream_request_cb, NULL);
-    pa_stream_set_latency_update_callback(stream, stream_latency_update_cb, NULL);
-
-    /* Connect stream with sink and default volume */
-    /* Buffer struct */
-
-    int aud_buffer = 4096;
-    size_t buffer_size = pa_usec_to_bytes(aud_buffer, &ss) * 1000;
-    pa_buffer_attr buffer = {(uint32_t) -1, (uint32_t) buffer_size,
-     (uint32_t) -1, (uint32_t) -1, (uint32_t) buffer_size};
-
-    pa_operation *o = NULL;
-    int success;
-
-    if (pa_stream_connect_playback (stream, NULL, & buffer, (pa_stream_flags_t)
-     (PA_STREAM_INTERPOLATE_TIMING | PA_STREAM_AUTO_TIMING_UPDATE), NULL, NULL) < 0)
+    if (!s)
     {
-        trace ("Failed to connect stream: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
+        trace ("pulse_init failed (%d)\n", error);
+        return -1;
     }
 
-
-    /* Wait until the stream is ready */
-    pa_threaded_mainloop_wait(mainloop);
-
-    if (pa_stream_get_state(stream) != PA_STREAM_READY) {
-        trace ("Failed to connect stream: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
-    }
-
-    /* Now subscribe to events */
-    if (!(o = pa_context_subscribe(context, PA_SUBSCRIPTION_MASK_SINK_INPUT, context_success_cb, &success))) {
-        trace ("pa_context_subscribe() failed: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
-    }
-
-    success = 0;
-    while (pa_operation_get_state(o) != PA_OPERATION_DONE) {
-        CHECK_DEAD_GOTO(FAIL2, 1);
-        pa_threaded_mainloop_wait(mainloop);
-    }
-
-    if (!success) {
-        trace ("pa_context_subscribe() failed: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
-    }
-
-    pa_operation_unref(o);
-
-    /* Now request the initial stream info */
-    if (!(o = pa_context_get_sink_input_info(context, pa_stream_get_index(stream), info_cb, NULL))) {
-        trace ("pa_context_get_sink_input_info() failed: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
-    }
-
-    while (pa_operation_get_state(o) != PA_OPERATION_DONE) {
-        CHECK_DEAD_GOTO(FAIL2, 1);
-        pa_threaded_mainloop_wait(mainloop);
-    }
-
-    if (!volume_valid) {
-        trace ("pa_context_get_sink_input_info() failed: %s\n", pa_strerror(pa_context_errno(context)));
-        goto FAIL2;
-    }
-    pa_operation_unref(o);
-
-    connected = TRUE;
-
-    pa_threaded_mainloop_unlock(mainloop);
-
-    return TRUE;
-
-FAIL2:
-    if (o)
-        pa_operation_unref(o);
-
-    pa_threaded_mainloop_unlock(mainloop);
-    pulse_free ();
-    return FALSE;
+    return 0;
 }
 
 static int pulse_init(void)
 {
     trace ("pulse_init\n");
     deadbeef->mutex_lock(mutex);
+    pulse_terminate = 0;
 
     if (requested_fmt.samplerate != 0) {
         memcpy (&plugin.fmt, &requested_fmt, sizeof (ddb_waveformat_t));
@@ -398,6 +174,7 @@ static int pulse_init(void)
         return -1;
     }
 
+    pulse_tid = deadbeef->thread_start(pulse_thread, NULL);
     deadbeef->mutex_unlock(mutex);
 
     return 0;
@@ -406,7 +183,7 @@ static int pulse_init(void)
 static int pulse_setformat (ddb_waveformat_t *fmt)
 {
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
-    if (!connected) {
+    if (!s) {
         return -1;
     }
     if (!memcmp (fmt, &plugin.fmt, sizeof (ddb_waveformat_t))) {
@@ -438,32 +215,18 @@ static int pulse_free(void)
     trace("pulse_free\n");
 
     deadbeef->mutex_lock(mutex);
-
-    connected = FALSE;
-
-    if (mainloop)
-        pa_threaded_mainloop_stop(mainloop);
-
-    if (stream) {
-        pa_stream_disconnect(stream);
-        pa_stream_unref(stream);
-        stream = NULL;
+    if (pulse_tid)
+    {
+        pulse_terminate = 1;
+        deadbeef->thread_join(pulse_tid);
     }
 
-    if (context) {
-        pa_context_disconnect(context);
-        pa_context_unref(context);
-        context = NULL;
+    pulse_tid = 0;
+    if (s)
+    {
+        pa_simple_free(s);
+        s = NULL;
     }
-
-    if (mainloop) {
-        pa_threaded_mainloop_free(mainloop);
-        mainloop = NULL;
-    }
-
-    volume_valid = FALSE;
-
-    state = OUTPUT_STATE_STOPPED;
     deadbeef->mutex_unlock(mutex);
 
     return 0;
@@ -475,7 +238,6 @@ static int pulse_play(void)
     if (state != OUTPUT_STATE_PLAYING)
     {
         state = OUTPUT_STATE_PLAYING;
-        if (connected) return 0;
         if (pulse_init () < 0)
         {
             state = prev_state;
@@ -498,37 +260,6 @@ static int pulse_stop(void)
     return 0;
 }
 
-void pulse_pause_internal(int pause)
-{
-    pa_operation *o = NULL;
-    int success = 0;
-
-    CHECK_CONNECTED();
-
-    pa_threaded_mainloop_lock(mainloop);
-    CHECK_DEAD_GOTO(fail, 1);
-
-    if (!(o = pa_stream_cork(stream, pause, stream_success_cb, &success))) {
-        trace("pa_stream_cork() failed: %s\n", pa_strerror(pa_context_errno(context)));
-        goto fail;
-    }
-
-    while (pa_operation_get_state(o) != PA_OPERATION_DONE) {
-        CHECK_DEAD_GOTO(fail, 1);
-        pa_threaded_mainloop_wait(mainloop);
-    }
-
-    if (!success)
-        trace("pa_stream_cork() failed: %s\n", pa_strerror(pa_context_errno(context)));
-
-fail:
-
-    if (o)
-        pa_operation_unref(o);
-
-    pa_threaded_mainloop_unlock(mainloop);
-}
-
 static int pulse_pause(void)
 {
     if (state == OUTPUT_STATE_STOPPED)
@@ -537,7 +268,7 @@ static int pulse_pause(void)
     }
 
     state = OUTPUT_STATE_PAUSED;
-    pulse_pause_internal(TRUE);
+    pulse_free();
     return 0;
 }
 
@@ -546,12 +277,64 @@ static int pulse_unpause(void)
     if (state == OUTPUT_STATE_PAUSED)
     {
         state = OUTPUT_STATE_PLAYING;
-        pulse_pause_internal(FALSE);
+        if (pulse_init () < 0)
+        {
+            state = OUTPUT_STATE_PAUSED;
+            return -1;
+        }
     }
 
     return 0;
 }
 
+static void pulse_thread(void *context)
+{
+#ifdef __linux__
+    prctl(PR_SET_NAME, "deadbeef-pulse", 0, 0, 0, 0);
+#endif
+
+    while (!pulse_terminate)
+    {
+        if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1))
+        {
+            usleep(10000);
+            continue;
+        }
+
+        int sample_size = plugin.fmt.channels * (plugin.fmt.bps / 8);
+        int bs = buffer_size;
+        int mod = bs % sample_size;
+        if (mod > 0) {
+            bs -= mod;
+        }
+
+        char buf[bs];
+        pulse_callback (buf, sizeof (buf));
+        int error;
+
+        deadbeef->mutex_lock(mutex);
+        int res = pa_simple_write(s, buf, sizeof (buf), &error);
+        deadbeef->mutex_unlock(mutex);
+
+        if (res < 0)
+        {
+            fprintf(stderr, "pulse: failed to write buffer\n");
+            pulse_tid = 0;
+            state = OUTPUT_STATE_STOPPED;
+            pulse_free ();
+            break;
+        }
+    }
+}
+
+static void pulse_callback(char *stream, int len)
+{
+    int bytesread = deadbeef->streamer_read(stream, len);
+    if (bytesread < len)
+    {
+        memset (stream + bytesread, 0, len-bytesread);
+    }
+}
 
 static int pulse_get_state(void)
 {
@@ -561,7 +344,6 @@ static int pulse_get_state(void)
 static int pulse_plugin_start(void)
 {
     state = OUTPUT_STATE_STOPPED;
-
     mutex = deadbeef->mutex_create();
 
     return 0;
@@ -570,41 +352,8 @@ static int pulse_plugin_start(void)
 static int pulse_plugin_stop(void)
 {
     deadbeef->mutex_free(mutex);
+
     return 0;
-}
-
-DB_plugin_t * pulse_load(DB_functions_t *api)
-{
-    deadbeef = api;
-    return DB_PLUGIN (&plugin);
-}
-
-void set_volume ()
-{
-    pa_operation * o;
-
-    if (! connected)
-        return;
-
-    pa_threaded_mainloop_lock (mainloop);
-    CHECK_DEAD_GOTO (fail, 1);
-
-
-    volume.values[0] = pa_sw_volume_from_dB(deadbeef->volume_get_db());
-    volume.values[1] = pa_sw_volume_from_dB(deadbeef->volume_get_db());
-    volume.channels = 2;
-
-    volume_valid = TRUE;
-
-    if (! (o = pa_context_set_sink_input_volume (context, pa_stream_get_index
-     (stream), & volume, NULL, NULL))) {
-        trace ("pa_context_set_sink_input_volume() failed: %s\n", pa_strerror
-         (pa_context_errno (context)));
-    } else
-        pa_operation_unref(o);
-
-fail:
-    pa_threaded_mainloop_unlock (mainloop);
 }
 
 static int
@@ -615,6 +364,12 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
         break;
     }
     return 0;
+}
+
+DB_plugin_t * pulse_load(DB_functions_t *api)
+{
+    deadbeef = api;
+    return DB_PLUGIN (&plugin);
 }
 
 #define STR_HELPER(x) #x
@@ -631,12 +386,14 @@ static DB_output_t plugin =
     .plugin.version_major = 0,
     .plugin.version_minor = 1,
     .plugin.type = DB_PLUGIN_OUTPUT,
-    .plugin.id = "pulseaudio2",
-    .plugin.name = "PulseAudio output plugin version 2",
-    .plugin.descr = "This is a new pulseaudio plugin that uses the asynchronous API",
+    .plugin.id = "pulseaudio",
+    .plugin.name = "PulseAudio output plugin",
+    .plugin.descr = "At the moment of this writing, PulseAudio seems to be very unstable in many (or most) GNU/Linux distributions.\nIf you experience problems - please try switching to ALSA or OSS output.\nIf that doesn't help - please uninstall PulseAudio from your system, and try ALSA or OSS again.\nThanks for understanding",
     .plugin.copyright =
         "PulseAudio output plugin for DeaDBeeF Player\n"
-        "Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>\n"
+        "Copyright (C) 2011 Jan D. Behrens <zykure@web.de>\n"
+        "Copyright (C) 2010-2012 Alexey Yakovenko <waker@users.sourceforge.net>\n"
+        "Copyright (C) 2010 Anton Novikov <tonn.post@gmail.com>\n"
         "\n"
         "This program is free software; you can redistribute it and/or\n"
         "modify it under the terms of the GNU General Public License\n"
@@ -651,7 +408,7 @@ static DB_output_t plugin =
         "You should have received a copy of the GNU General Public License\n"
         "along with this program; if not, write to the Free Software\n"
         "Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.\n",
-    .plugin.website = "http://saivert.com",
+    .plugin.website = "http://deadbeef.sf.net",
     .plugin.start = pulse_plugin_start,
     .plugin.stop = pulse_plugin_stop,
     .plugin.configdialog = settings_dlg,
