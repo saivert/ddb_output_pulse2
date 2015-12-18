@@ -22,7 +22,7 @@
 #  include "../config.h"
 #endif
 
-#include <pasimple.h>
+#include "pasimple.h"
 
 #include <stdint.h>
 #include <unistd.h>
