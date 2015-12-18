@@ -4,3 +4,4 @@ AM_CFLAGS = $(CFLAGS) $(PULSE_DEPS_CFLAGS) -std=c99
 pulse_la_SOURCES = pulse.c pasimple.c
 pulse_la_LDFLAGS = -module -avoid-version
 pulse_la_LIBADD = $(LDADD) $(PULSE_DEPS_LIBS)
+pulse_la_CFLAGS = -I$(top_srcdir)/pulseaudio/src

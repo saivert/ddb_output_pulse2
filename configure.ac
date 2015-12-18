@@ -20,8 +20,8 @@ PKG_PROG_PKG_CONFIG
 
 # Checks for libraries.
 LT_INIT
-PKG_CHECK_MODULES(PULSE_DEPS, libpulse-simple, , 
-	AC_MSG_ERROR([libpulse-simple is required for this package])
+PKG_CHECK_MODULES(PULSE_DEPS, libpulse, , 
+	AC_MSG_ERROR([libpulse is required for this package])
 )
 
 
