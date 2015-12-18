@@ -157,7 +157,8 @@ int pa_simple_flush(pa_simple *s, int *error);
 
 int pa_simple_set_volume(pa_simple *p, pa_cvolume volume);
 
-typedef void(* pa_simple_volume_change_cb_t)(pa_cvolume vol);
+typedef void(* pa_simple_volume_change_cb_t)(pa_simple *s, pa_cvolume vol);
+void pa_simple_set_volume_change_cb(pa_simple *p, pa_simple_volume_change_cb_t cb);
 
 PA_C_DECL_END
 

@@ -50,7 +50,7 @@ struct pa_simple {
 };
 
 static pa_cvolume volume;
-static int volume_valid = FALSE;
+static int volume_valid = 0;
 
 #define CHECK_VALIDITY_RETURN_ANY(rerror, expression, error, ret)       \
     do {                                                                \
@@ -140,15 +140,36 @@ static void stream_latency_update_cb(pa_stream *s, void *userdata) {
 }
 
 static void info_cb(struct pa_context *c, const struct pa_sink_input_info *i, int is_last, void *userdata) {
+    pa_simple *p = userdata;
+
     pa_assert(c);
 
     if (!i)
         return;
 
     volume = i->volume;
-    volume_valid = TRUE;
+    volume_valid = 1;
 
+    if (p && p->volume_change_cb) p->volume_change_cb(p, volume);
+}
 
+static void subscribe_cb(struct pa_context *c, enum pa_subscription_event_type t, uint32_t index, void *userdata) {
+    pa_operation *o;
+
+    assert(c);
+    pa_simple *p = userdata;
+
+    if (!p->stream ||
+        index != pa_stream_get_index(p->stream) ||
+        (t != (PA_SUBSCRIPTION_EVENT_SINK_INPUT|PA_SUBSCRIPTION_EVENT_CHANGE) &&
+         t != (PA_SUBSCRIPTION_EVENT_SINK_INPUT|PA_SUBSCRIPTION_EVENT_NEW)))
+        return;
+
+    if (!(o = pa_context_get_sink_input_info(c, index, info_cb, userdata))) {
+        return;
+    }
+
+    pa_operation_unref(o);
 }
 
 pa_simple* pa_simple_new(
@@ -513,21 +534,57 @@ unlock_and_fail:
 }
 
 int pa_simple_set_volume(pa_simple *p, pa_cvolume volume) {
-    pa_operation * o;
+    int rerror = 0;
+    int returnval;
+    pa_operation *o = NULL;
 
     pa_threaded_mainloop_lock (p->mainloop);
-    CHECK_DEAD_GOTO (p, 0, fail);
+    CHECK_DEAD_GOTO (p, &rerror, fail);
 
-    volume_valid = TRUE;
+    volume_valid = 1;
 
     if (! (o = pa_context_set_sink_input_volume (p->context, pa_stream_get_index
      (p->stream), & volume, NULL, NULL))) {
-        trace ("pa_context_set_sink_input_volume() failed: %s\n", pa_strerror
-         (pa_context_errno (p->context)));
-    } else
+        returnval = 0;
+    } else {
         pa_operation_unref(o);
+        returnval = 1;
+    }
 
 fail:
     pa_threaded_mainloop_unlock (p->mainloop);
-    return 0;
+    return returnval;
+}
+
+static void context_success_cb(pa_context *c, int success, void *userdata) {
+    assert(c);
+
+    pa_simple *p = userdata;
+    if (p) {
+        pa_context_get_sink_input_info(c, pa_stream_get_index(p->stream), info_cb, userdata);
+    }
+
+    pa_threaded_mainloop_signal(p->mainloop, 0);
+}
+
+void pa_simple_set_volume_change_cb(pa_simple *p, pa_simple_volume_change_cb_t cb) {
+    pa_operation *o = NULL;
+
+    pa_assert(p);
+    pa_assert(cb);
+
+    p->volume_change_cb = cb;
+
+    pa_threaded_mainloop_lock(p->mainloop);
+
+    pa_context_set_subscribe_callback(p->context, subscribe_cb, p);
+
+    if (!(o = pa_context_subscribe(p->context, PA_SUBSCRIPTION_MASK_SINK_INPUT, context_success_cb, p))) {
+        goto fail;
+    }
+    pa_operation_unref(o);
+
+fail:
+    pa_threaded_mainloop_unlock (p->mainloop);
+
 }

@@ -19,7 +19,7 @@
 */
 
 #ifdef HAVE_CONFIG_H
-#  include "../../config.h"
+#  include "../config.h"
 #endif
 
 #include <pasimple.h>
@@ -33,7 +33,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "../../deadbeef.h"
+#include <deadbeef/deadbeef.h>
 
 //#define trace(...) { fprintf(stdout, __VA_ARGS__); }
 #define trace(fmt,...)
@@ -73,6 +73,8 @@ static int pulse_stop();
 static int pulse_pause();
 
 static int pulse_unpause();
+
+void pa_simple_volume_change_cb(pa_simple *s, pa_cvolume vol);
 
 static int pulse_set_spec(ddb_waveformat_t *fmt)
 {
@@ -155,6 +157,8 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         trace ("pulse_init failed (%d)\n", error);
         return -1;
     }
+
+    pa_simple_set_volume_change_cb(s, pa_simple_volume_change_cb);
 
     return 0;
 }
@@ -356,12 +360,18 @@ static int pulse_plugin_stop(void)
     return 0;
 }
 
+void pa_simple_volume_change_cb(pa_simple *s, pa_cvolume vol)
+{
+    deadbeef->volume_set_amp(pa_sw_volume_to_linear(pa_cvolume_avg(&vol)));
+}
+
 static int
 pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
-    switch (id) {
-    case DB_EV_VOLUMECHANGED:
-        set_volume();
-        break;
+    if (id==DB_EV_VOLUMECHANGED && s) {
+        pa_cvolume volume;
+        volume.values[0] = pa_sw_volume_from_linear(deadbeef->volume_get_amp());
+        volume.channels = 1;
+        pa_simple_set_volume(s, volume);
     }
     return 0;
 }
@@ -386,14 +396,15 @@ static DB_output_t plugin =
     .plugin.version_major = 0,
     .plugin.version_minor = 1,
     .plugin.type = DB_PLUGIN_OUTPUT,
-    .plugin.id = "pulseaudio",
-    .plugin.name = "PulseAudio output plugin",
-    .plugin.descr = "At the moment of this writing, PulseAudio seems to be very unstable in many (or most) GNU/Linux distributions.\nIf you experience problems - please try switching to ALSA or OSS output.\nIf that doesn't help - please uninstall PulseAudio from your system, and try ALSA or OSS again.\nThanks for understanding",
+    .plugin.id = "pulseaudio2",
+    .plugin.name = "PulseAudio output plugin 2",
+    .plugin.descr = "This version of the Pulse Audio plugin adds sink input volume control integration",
     .plugin.copyright =
         "PulseAudio output plugin for DeaDBeeF Player\n"
         "Copyright (C) 2011 Jan D. Behrens <zykure@web.de>\n"
         "Copyright (C) 2010-2012 Alexey Yakovenko <waker@users.sourceforge.net>\n"
         "Copyright (C) 2010 Anton Novikov <tonn.post@gmail.com>\n"
+        "Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>\n"
         "\n"
         "This program is free software; you can redistribute it and/or\n"
         "modify it under the terms of the GNU General Public License\n"
