@@ -23,12 +23,11 @@
 #include <pulse/pulseaudio.h>
 
 #include <string.h>
+#include <stdbool.h>
 #include <deadbeef/deadbeef.h>
 
 #define trace(...) { fprintf(stdout, __VA_ARGS__); }
 //#define trace(fmt,...)
-#define FALSE (0)
-#define TRUE (1)
 
 DB_functions_t * deadbeef;
 static DB_output_t plugin;
@@ -42,9 +41,9 @@ static pa_stream *stream = NULL;
 static pa_threaded_mainloop *mainloop = NULL;
 
 static pa_cvolume volume;
-static int volume_valid = FALSE;
+static int volume_valid = false;
 
-static int connected = FALSE;
+static int connected = false;
 
 static pa_sample_spec ss;
 static ddb_waveformat_t requested_fmt;
@@ -92,7 +91,7 @@ static void info_cb(struct pa_context *c, const struct pa_sink_input_info *i, in
         return;
 
     volume = i->volume;
-    volume_valid = TRUE;
+    volume_valid = true;
 
     // Wrapping this in mutex lock doesn't work
     deadbeef->volume_set_db(pa_sw_volume_to_dB(pa_cvolume_avg(&volume)));
@@ -257,12 +256,12 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
     if (!pa_sample_spec_valid(&ss)) {
         trace ("Sample spec invalid\n");
-        return FALSE;
+        return false;
     }
 
     if (!(mainloop = pa_threaded_mainloop_new())) {
         trace ("Failed to allocate main loop\n");
-        return FALSE;
+        return false;
     }
 
     pa_threaded_mainloop_lock(mainloop);
@@ -299,7 +298,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 FAIL1:
         pa_threaded_mainloop_unlock (mainloop);
         pulse_free ();
-        return FALSE;
+        return false;
     }
 
     pa_stream_set_state_callback(stream, stream_state_cb, NULL);
@@ -369,11 +368,11 @@ FAIL1:
     }
     pa_operation_unref(o);
 
-    connected = TRUE;
+    connected = true;
 
     pa_threaded_mainloop_unlock(mainloop);
 
-    return TRUE;
+    return true;
 
 FAIL2:
     if (o)
@@ -381,7 +380,7 @@ FAIL2:
 
     pa_threaded_mainloop_unlock(mainloop);
     pulse_free ();
-    return FALSE;
+    return false;
 }
 
 static int pulse_init(void)
@@ -439,7 +438,7 @@ static int pulse_free(void)
 
     deadbeef->mutex_lock(mutex);
 
-    connected = FALSE;
+    connected = false;
 
     if (mainloop)
         pa_threaded_mainloop_stop(mainloop);
@@ -461,7 +460,7 @@ static int pulse_free(void)
         mainloop = NULL;
     }
 
-    volume_valid = FALSE;
+    volume_valid = false;
 
     state = OUTPUT_STATE_STOPPED;
     deadbeef->mutex_unlock(mutex);
@@ -537,7 +536,7 @@ static int pulse_pause(void)
     }
 
     state = OUTPUT_STATE_PAUSED;
-    pulse_pause_internal(TRUE);
+    pulse_pause_internal(true);
     return 0;
 }
 
@@ -546,7 +545,7 @@ static int pulse_unpause(void)
     if (state == OUTPUT_STATE_PAUSED)
     {
         state = OUTPUT_STATE_PLAYING;
-        pulse_pause_internal(FALSE);
+        pulse_pause_internal(false);
     }
 
     return 0;
@@ -594,7 +593,7 @@ void set_volume ()
     volume.values[1] = pa_sw_volume_from_dB(deadbeef->volume_get_db());
     volume.channels = 2;
 
-    volume_valid = TRUE;
+    volume_valid = true;
 
     if (! (o = pa_context_set_sink_input_volume (context, pa_stream_get_index
      (stream), & volume, NULL, NULL))) {
