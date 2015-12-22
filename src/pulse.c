@@ -35,8 +35,8 @@
 #include <string.h>
 #include <deadbeef/deadbeef.h>
 
-//#define trace(...) { fprintf(stdout, __VA_ARGS__); }
-#define trace(fmt,...)
+#define trace(...) { fprintf(stdout, __VA_ARGS__); }
+//#define trace(fmt,...)
 
 static DB_output_t plugin;
 DB_functions_t * deadbeef;
@@ -362,14 +362,14 @@ static int pulse_plugin_stop(void)
 
 void pa_simple_volume_change_cb(pa_simple *s, pa_cvolume vol)
 {
-    deadbeef->volume_set_db(pa_sw_volume_to_dB(pa_cvolume_avg(&vol)));
+    deadbeef->volume_set_amp(pa_sw_volume_to_linear(pa_cvolume_avg(&vol)));
 }
 
 static int
 pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
     if (id==DB_EV_VOLUMECHANGED && s) {
         pa_cvolume volume;
-        pa_cvolume_set(pa_cvolume_init(&volume), 1, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
+        pa_cvolume_set(pa_cvolume_init(&volume), 1, pa_sw_volume_from_linear( deadbeef->volume_get_amp() ));
         pa_simple_set_volume(s, volume);
     }
     return 0;

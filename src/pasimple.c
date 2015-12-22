@@ -50,7 +50,6 @@ struct pa_simple {
 };
 
 static pa_cvolume volume;
-static int volume_valid = 0;
 
 #define CHECK_VALIDITY_RETURN_ANY(rerror, expression, error, ret)       \
     do {                                                                \
@@ -148,7 +147,6 @@ static void info_cb(struct pa_context *c, const struct pa_sink_input_info *i, in
         return;
 
     volume = i->volume;
-    volume_valid = 1;
 
     if (p && p->volume_change_cb) p->volume_change_cb(p, volume);
 }
@@ -540,8 +538,6 @@ int pa_simple_set_volume(pa_simple *p, pa_cvolume volume) {
 
     pa_threaded_mainloop_lock (p->mainloop);
     CHECK_DEAD_GOTO (p, &rerror, fail);
-
-    volume_valid = 1;
 
     if (! (o = pa_context_set_sink_input_volume (p->context, pa_stream_get_index
      (p->stream), & volume, NULL, NULL))) {
