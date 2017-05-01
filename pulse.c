@@ -572,7 +572,7 @@ static int pulse_plugin_stop(void)
     return 0;
 }
 
-DB_plugin_t * pulse_load(DB_functions_t *api)
+DB_plugin_t * pulse2_load(DB_functions_t *api)
 {
     deadbeef = api;
     return DB_PLUGIN (&plugin);
