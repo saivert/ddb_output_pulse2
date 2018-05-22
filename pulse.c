@@ -398,17 +398,24 @@ static int pulse_init(void)
 
 static int pulse_setformat (ddb_waveformat_t *fmt)
 {
+    int st = state;
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
-    if (!pa_s) {
-        return -1;
-    }
-    if (!memcmp (fmt, &plugin.fmt, sizeof (ddb_waveformat_t))) {
-        trace ("pulse_setformat ignored\n");
+    if (!pa_s
+        || !memcmp (fmt, &plugin.fmt, sizeof (ddb_waveformat_t))) {
         return 0;
     }
-    trace ("pulse_setformat %dbit %s %dch %dHz channelmask=%X\n", fmt->bps, fmt->is_float ? "float" : "int", fmt->channels, fmt->samplerate, fmt->channelmask);
 
-    //pulse_set_spec(fmt);
+	//_pa_stream_drain();
+    pulse_free ();
+    pulse_init ();
+    int res = 0;
+    if (st == OUTPUT_STATE_PLAYING) {
+        res = pulse_play ();
+    }
+    else if (st == OUTPUT_STATE_PAUSED) {
+        res = pulse_pause ();
+    }
+
     return 0;
 }
 
@@ -499,9 +506,16 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 	pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
     pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
 
+	pa_buffer_attr attr = {
+		.maxlength = -1,
+		.tlength = 4600,
+		.prebuf = -1,
+		.minreq = -1,
+	};
+
 	rc = pa_stream_connect_playback(pa_s,
 					NULL,
-					NULL,
+					&attr,
 					PA_STREAM_NOFLAGS,
 					pa_restore_volume ? NULL : &pa_vol,
 					NULL);
