@@ -41,8 +41,7 @@ do {					\
 #define OP_ERROR_SUCCESS 0
 #define OP_ERROR_INTERNAL 1
 
-/* Optimization: Condition @x is likely */
-#define likely(x)	__builtin_expect(!!(x), 1)
+
 
 /* Optimization: Condition @x is unlikely */
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -335,27 +334,6 @@ out_fail:
 }
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
-
-
-#if 0
-    int bytes_remaining = requested_bytes;
-    while (bytes_remaining > 0) {
-        uint8_t *buffer = NULL;
-        size_t bytes_to_fill = 4096;
-        size_t i;
-
-        if (bytes_to_fill > bytes_remaining) bytes_to_fill = bytes_remaining;
-
-        pa_stream_begin_write(s, (void**) &buffer, &bytes_to_fill);
-
-        bytes_to_fill = deadbeef->streamer_read (buffer, bytes_to_fill);
-
-        pa_stream_write(s, buffer, bytes_to_fill, NULL, 0LL, PA_SEEK_RELATIVE);
-
-        bytes_remaining -= bytes_to_fill;
-            }
-#else
-
     uint8_t *buffer = NULL;
     size_t bufsize = requested_bytes;
     pa_stream_begin_write(s, (void**) &buffer, &bufsize);
@@ -366,10 +344,6 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
         }
 
     pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
-
-#endif
-
-
 }
 
 
@@ -405,7 +379,6 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
         return 0;
     }
 
-	//_pa_stream_drain();
     pulse_stop();
     pulse_free ();
     pulse_init ();
@@ -567,12 +540,6 @@ static int pulse_stop(void)
        return 0;
     }
 
-	/*
-	 * If this _pa_stream_drain() will be moved below following
-	 * pa_threaded_mainloop_lock(), PulseAudio 0.9.19 will hang.
-	 */
-	// if (pa_s)
-	// 	_pa_stream_drain();
 
 	pa_threaded_mainloop_lock(pa_ml);
 
@@ -619,15 +586,7 @@ static int set_volume()
 		return -1;
 
 	pa_cvolume_set(&pa_vol, pa_ss.channels, (pa_volume_t) (pa_sw_volume_from_linear(deadbeef->volume_get_amp())));
-	// pa_cvolume_set_position(&pa_vol,
-	// 			&pa_cmap,
-	// 			PA_CHANNEL_POSITION_FRONT_LEFT,
-	// 			(pa_volume_t)l);
 
-	// pa_cvolume_set_position(&pa_vol,
-	// 			&pa_cmap,
-	// 			PA_CHANNEL_POSITION_FRONT_RIGHT,
-	// 			(pa_volume_t)r);
 
 	if (!pa_s) {
 		return OP_ERROR_SUCCESS;
