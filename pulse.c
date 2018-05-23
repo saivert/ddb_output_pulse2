@@ -106,7 +106,7 @@ static pa_proplist *_create_app_proplist(void)
 	rc = pa_proplist_sets(pl, PA_PROP_APPLICATION_NAME, "DeaDBeeF Music Player");
 	BUG_ON(rc);
 
-	rc = pa_proplist_sets(pl, PA_PROP_APPLICATION_VERSION, "1.8");
+	rc = pa_proplist_sets(pl, PA_PROP_APPLICATION_ID, "music.deadbeef.player");
 	BUG_ON(rc);
 
 
