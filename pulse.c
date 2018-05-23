@@ -406,6 +406,7 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
     }
 
 	//_pa_stream_drain();
+    pulse_stop();
     pulse_free ();
     pulse_init ();
     int res = 0;
