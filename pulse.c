@@ -296,7 +296,11 @@ static int _pa_create_context(void)
 
 	pa_context_set_state_callback(pa_ctx, _pa_context_running_cb, NULL);
 
-	rc = pa_context_connect(pa_ctx, NULL, PA_CONTEXT_NOFLAGS, NULL);
+    // Read serveraddr from config
+    char server[1000];
+    deadbeef->conf_get_str (CONFSTR_PULSE_SERVERADDR, "", server, sizeof (server));
+
+	rc = pa_context_connect(pa_ctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL);
 	if (rc)
 		goto out_fail;
 
@@ -480,9 +484,11 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 	pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
     pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
 
+    buffer_size = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
+
 	pa_buffer_attr attr = {
 		.maxlength = -1,
-		.tlength = 4600,
+		.tlength = buffer_size,
 		.prebuf = -1,
 		.minreq = -1,
 	};
