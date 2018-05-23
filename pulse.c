@@ -643,7 +643,7 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
 #define STR(x) STR_HELPER(x)
 
 static const char settings_dlg[] =
-    "property \"PulseAudio server\" entry " CONFSTR_PULSE_SERVERADDR " default;\n"
+    "property \"PulseAudio server (leave empty for default)\" entry " CONFSTR_PULSE_SERVERADDR " \"\";\n"
     "property \"Preferred buffer size\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n";
 
 static DB_output_t plugin =
