@@ -95,6 +95,8 @@ static int pa_restore_volume = 1;
 
 #define ret_pa_last_error() ret_pa_error(pa_context_errno(pa_ctx))
 
+static int _pa_nowait_unlock(pa_operation *o);
+
 static pa_proplist *_create_app_proplist(void)
 {
 	pa_proplist	*pl;
@@ -210,6 +212,27 @@ static void _pa_sink_input_info_cb(pa_context *c,
 	if (i) {
 		memcpy(&pa_vol, &i->volume, sizeof(pa_vol));
         deadbeef->volume_set_amp(pa_sw_volume_to_linear(pa_cvolume_avg(&pa_vol)));
+	}
+}
+
+static int set_volume()
+{
+	if (!pa_s && pa_restore_volume)
+		return -1;
+
+	pa_cvolume_set(&pa_vol, pa_ss.channels, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
+
+
+	if (!pa_s) {
+		return OP_ERROR_SUCCESS;
+	} else {
+		pa_threaded_mainloop_lock(pa_ml);
+
+		return _pa_nowait_unlock(pa_context_set_sink_input_volume(pa_ctx,
+								          pa_stream_get_index(pa_s),
+								          &pa_vol,
+								          NULL,
+								          NULL));
 	}
 }
 
@@ -586,26 +609,7 @@ static int pulse_get_state(void)
     return state;
 }
 
-static int set_volume()
-{
-	if (!pa_s && pa_restore_volume)
-		return -1;
 
-	pa_cvolume_set(&pa_vol, pa_ss.channels, (pa_volume_t) (pa_sw_volume_from_linear(deadbeef->volume_get_amp())));
-
-
-	if (!pa_s) {
-		return OP_ERROR_SUCCESS;
-	} else {
-		pa_threaded_mainloop_lock(pa_ml);
-
-		return _pa_nowait_unlock(pa_context_set_sink_input_volume(pa_ctx,
-								          pa_stream_get_index(pa_s),
-								          &pa_vol,
-								          NULL,
-								          NULL));
-	}
-}
 
 static int pulse_plugin_start(void)
 {
