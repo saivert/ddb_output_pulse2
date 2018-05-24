@@ -51,6 +51,8 @@ static DB_output_t plugin;
 
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
+#define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
+#define PULSE_DEFAULT_VOLUMECONTROL 1
 #define PULSE_DEFAULT_BUFFERSIZE 4096
 
 
@@ -209,7 +211,7 @@ static void _pa_sink_input_info_cb(pa_context *c,
 				   int eol,
 				   void *data)
 {
-	if (i) {
+	if (i && plugin.has_volume) {
 		memcpy(&pa_vol, &i->volume, sizeof(pa_vol));
         deadbeef->volume_set_amp(pa_sw_volume_to_linear(pa_cvolume_avg(&pa_vol)));
 	}
@@ -219,6 +221,10 @@ static int set_volume()
 {
 	if (!pa_s && pa_restore_volume)
 		return -1;
+
+	if (!plugin.has_volume) {
+		return -1;
+	}
 
 	pa_cvolume_set(&pa_vol, pa_ss.channels, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
 
@@ -639,6 +645,9 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
             set_volume();
         }
         break;
+	case DB_EV_CONFIGCHANGED:
+		plugin.has_volume = deadbeef->conf_get_int(CONFSTR_PULSE_VOLUMECONTROL, PULSE_DEFAULT_VOLUMECONTROL);
+		break;
     }
     return 0;
 }
@@ -648,7 +657,8 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
 
 static const char settings_dlg[] =
     "property \"PulseAudio server (leave empty for default)\" entry " CONFSTR_PULSE_SERVERADDR " \"\";\n"
-    "property \"Preferred buffer size\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n";
+    "property \"Preferred buffer size\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n"
+    "property \"Use pulseaudio volume control\" checkbox " CONFSTR_PULSE_VOLUMECONTROL " " STR(PULSE_DEFAULT_VOLUMECONTROL) ";\n";
 
 static DB_output_t plugin =
 {
@@ -690,5 +700,5 @@ static DB_output_t plugin =
     .pause = pulse_pause,
     .unpause = pulse_unpause,
     .state = pulse_get_state,
-    .has_volume = 1,
+    .has_volume = PULSE_DEFAULT_VOLUMECONTROL,
 };
