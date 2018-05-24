@@ -52,7 +52,7 @@ static DB_output_t plugin;
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
-#define PULSE_DEFAULT_VOLUMECONTROL 1
+#define PULSE_DEFAULT_VOLUMECONTROL 0
 #define PULSE_DEFAULT_BUFFERSIZE 4096
 
 
