@@ -306,11 +306,12 @@ static void _pa_ctx_subscription_cb(pa_context *ctx, pa_subscription_event_type_
         pa_context_get_sink_input_info(ctx, idx, _pa_sink_input_info_cb, NULL);
 }
 
-static int _pa_create_context(void)
+static int _pa_create_context(pa_context **ctxout)
 {
     pa_mainloop_api	*api;
     pa_proplist	*pl;
     int		 rc;
+    pa_context *ctx;
 
     pl = _create_app_proplist();
 
@@ -319,23 +320,23 @@ static int _pa_create_context(void)
 
     pa_threaded_mainloop_lock(pa_ml);
 
-    pa_ctx = pa_context_new_with_proplist(api, "DeaDBeeF Music Player", pl);
-    BUG_ON(!pa_ctx);
+    ctx = pa_context_new_with_proplist(api, "DeaDBeeF Music Player", pl);
+    BUG_ON(!ctx);
     pa_proplist_free(pl);
 
-    pa_context_set_state_callback(pa_ctx, _pa_context_running_cb, NULL);
+    pa_context_set_state_callback(ctx, _pa_context_running_cb, NULL);
 
     // Read serveraddr from config
     char server[1000];
     deadbeef->conf_get_str (CONFSTR_PULSE_SERVERADDR, "", server, sizeof (server));
 
-    rc = pa_context_connect(pa_ctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL);
+    rc = pa_context_connect(ctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL);
     if (rc)
         goto out_fail;
 
     for (;;) {
         pa_context_state_t state;
-        state = pa_context_get_state(pa_ctx);
+        state = pa_context_get_state(ctx);
         if (state == PA_CONTEXT_READY)
             break;
         if (!PA_CONTEXT_IS_GOOD(state))
@@ -343,23 +344,24 @@ static int _pa_create_context(void)
         pa_threaded_mainloop_wait(pa_ml);
     }
 
-    pa_context_set_subscribe_callback(pa_ctx, _pa_ctx_subscription_cb, NULL);
-    pa_operation *op = pa_context_subscribe(pa_ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT,
+    pa_context_set_subscribe_callback(ctx, _pa_ctx_subscription_cb, NULL);
+    pa_operation *op = pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT,
             NULL, NULL);
     if (!op)
         goto out_fail_connected;
     pa_operation_unref(op);
 
     pa_threaded_mainloop_unlock(pa_ml);
+    *ctxout = ctx;
 
     return OP_ERROR_SUCCESS;
 
 out_fail_connected:
-    pa_context_disconnect(pa_ctx);
+    pa_context_disconnect(ctx);
 
 out_fail:
-    pa_context_unref(pa_ctx);
-    pa_ctx = NULL;
+    pa_context_unref(ctx);
+    ctx = NULL;
 
     pa_threaded_mainloop_unlock(pa_ml);
 
@@ -502,7 +504,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     };
 
     trace("Pulseaudio: create context\n");
-    rc = _pa_create_context();
+    rc = _pa_create_context(&pa_ctx);
     if (rc)
         return rc;
 
@@ -679,6 +681,101 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
     return 0;
 }
 
+struct enum_card_userdata {
+    void (*callback)(const char *name, const char *desc, void *);
+    void *userdata;
+    pa_threaded_mainloop *ml;
+};
+
+static void
+sink_info_callback(pa_context *c, const pa_sink_info *i, int eol, void *userdata)  {
+    struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
+
+    if (eol) {
+        pa_threaded_mainloop_signal(ud->ml,0);
+        return;
+    }
+
+    printf("name=%s, description=%s\n", i->name, i->description);
+
+    ud->callback(i->name ? i->name : "", i->description ? i->description : "", ud->userdata);
+}
+
+void enumctx_state_cb(pa_context *c, void *userdata)
+{
+    switch (pa_context_get_state(c))
+    {
+    case PA_CONTEXT_UNCONNECTED:
+    case PA_CONTEXT_CONNECTING:
+    case PA_CONTEXT_AUTHORIZING:
+    case PA_CONTEXT_SETTING_NAME:
+        break;
+
+    case PA_CONTEXT_READY:
+    {
+        //struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
+        //pa_context_get_sink_info_list(c, sink_info_callback, ud);
+        break;
+    }
+    case PA_CONTEXT_FAILED:
+    case PA_CONTEXT_TERMINATED:
+    {
+        break;
+    }
+    default:
+        return;
+    }
+}
+
+static void
+pulse_enum_soundcards(void (*callback)(const char *name, const char *desc, void *), void *userdata)
+{
+
+    pa_context *enumctx;
+    struct enum_card_userdata ud = {callback, userdata};
+
+    pa_threaded_mainloop *ml = pa_threaded_mainloop_new();
+    pa_mainloop_api *api = pa_threaded_mainloop_get_api(ml);
+    enumctx = pa_context_new(api, "DeaDBeeF Info");
+    ud.ml = ml;
+
+    pa_context_set_state_callback(enumctx, enumctx_state_cb, &ud);
+
+    if (pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
+    {
+        trace("Cannot connect enumctx\n");
+        goto out_fail_connected;
+    }
+    pa_threaded_mainloop_start(ml);
+
+    pa_threaded_mainloop_lock(ml); 
+
+    for (;;) {
+        pa_context_state_t state;
+        state = pa_context_get_state(enumctx);
+        if (state == PA_CONTEXT_READY)
+            break;
+        if (!PA_CONTEXT_IS_GOOD(state))
+            goto out_fail_connected;
+        pa_threaded_mainloop_wait(ml);
+    }
+
+    pa_operation *o = pa_context_get_sink_info_list(enumctx, sink_info_callback, &ud);
+
+
+    // pa_threaded_mainloop_lock(ml);
+    // pa_threaded_mainloop_wait(ml);
+    // pa_threaded_mainloop_accept(pa_ml);
+    pa_threaded_mainloop_unlock(ml);
+
+out_fail_connected:
+
+    pa_context_disconnect(enumctx);
+    pa_context_unref(enumctx);
+    pa_threaded_mainloop_stop(ml);
+    pa_threaded_mainloop_free(ml);
+}
+
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
@@ -728,5 +825,6 @@ static DB_output_t plugin =
     .pause = pulse_pause,
     .unpause = pulse_unpause,
     .state = pulse_get_state,
+    .enum_soundcards = pulse_enum_soundcards,
     .has_volume = PULSE_DEFAULT_VOLUMECONTROL,
 };
