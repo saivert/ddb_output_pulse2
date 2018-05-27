@@ -369,13 +369,19 @@ out_fail:
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     uint8_t *buffer = NULL;
     size_t bufsize = requested_bytes;
+    int bytesread;
+
     pa_stream_begin_write(s, (void**) &buffer, &bufsize);
 
-    int bytesread = deadbeef->streamer_read(buffer, bufsize);
-    if (bytesread < 0) {
-        bytesread = 0;
+    if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
+        memset (buffer, 0, bufsize);
+		bytesread = bufsize;
+    } else {
+        bytesread = deadbeef->streamer_read(buffer, bufsize);
+        if (bytesread < 0) {
+            bytesread = 0;
         }
-
+    }
     pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
 }
 
@@ -561,6 +567,10 @@ out_fail:
 static int pulse_play(void)
 {
     trace ("pulse_play\n");
+
+	if (!pa_ml) {
+		pulse_init();
+	}
 
     deadbeef->mutex_lock (mutex);
 
