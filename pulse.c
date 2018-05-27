@@ -430,6 +430,11 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
 static int pulse_free(void)
 {
     trace("pulse_free\n");
+
+    if (pa_s) {
+        pulse_stop();
+    }
+
 	if (pa_ml) {
 		pa_threaded_mainloop_stop(pa_ml);
 		pa_threaded_mainloop_free(pa_ml);
