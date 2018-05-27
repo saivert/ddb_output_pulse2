@@ -86,8 +86,6 @@ static pa_channel_map		 pa_cmap;
 static pa_cvolume		 pa_vol;
 static pa_sample_spec		 pa_ss;
 
-/* configuration */
-static int pa_restore_volume = 1;
 
 #define ret_pa_error(err)						\
 	do {								\
@@ -219,12 +217,9 @@ static void _pa_sink_input_info_cb(pa_context *c,
 
 static int set_volume()
 {
-	if (!pa_s && pa_restore_volume)
+	if (!pa_s || !plugin.has_volume) {
 		return -1;
-
-	if (!plugin.has_volume) {
-		return -1;
-	}
+    }
 
 	pa_cvolume_set(&pa_vol, pa_ss.channels, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
 
@@ -532,7 +527,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 					NULL,
 					&attr,
 					PA_STREAM_NOFLAGS,
-					pa_restore_volume ? NULL : &pa_vol,
+					NULL,
 					NULL);
 	if (rc)
 		goto out_fail;
