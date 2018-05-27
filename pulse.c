@@ -449,7 +449,6 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     pa_proplist	*pl;
     int		 rc, i;
 
-    deadbeef->mutex_lock(mutex);
 
 
     memcpy (&plugin.fmt, fmt, sizeof (ddb_waveformat_t));
@@ -547,7 +546,6 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
     pa_threaded_mainloop_unlock(pa_ml);
 
-    deadbeef->mutex_unlock(mutex);
 
 
     state = OUTPUT_STATE_PLAYING;
@@ -558,7 +556,6 @@ out_fail:
 
     pa_threaded_mainloop_unlock(pa_ml);
 
-    deadbeef->mutex_unlock(mutex);
 
 
     ret_pa_last_error();
@@ -572,10 +569,8 @@ static int pulse_play(void)
         pulse_init();
     }
 
-    deadbeef->mutex_lock (mutex);
 
     int ret = pulse_set_spec(&plugin.fmt);
-    deadbeef->mutex_unlock (mutex);
     return ret;
 }
 
