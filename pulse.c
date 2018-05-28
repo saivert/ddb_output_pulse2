@@ -532,12 +532,19 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         .minreq = (uint32_t) -1,
     };
 
+    deadbeef->conf_lock ();
+    const char *dev = deadbeef->conf_get_str_fast ("alsa_soundcard", "default");
+
+    // TODO: Handle case of configured device no longer existing, fallback to default
+
     rc = pa_stream_connect_playback(pa_s,
-                    NULL,
+                    (!strcmp(dev, "default")) ? NULL: dev,
                     &attr,
                     PA_STREAM_NOFLAGS,
                     NULL,
                     NULL);
+    deadbeef->conf_unlock ();
+
     if (rc)
         goto out_fail;
 
@@ -684,7 +691,7 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
 struct enum_card_userdata {
     void (*callback)(const char *name, const char *desc, void *);
     void *userdata;
-    pa_threaded_mainloop *ml;
+    pa_mainloop *ml;
 };
 
 static void
@@ -692,11 +699,9 @@ sink_info_callback(pa_context *c, const pa_sink_info *i, int eol, void *userdata
     struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
 
     if (eol) {
-        pa_threaded_mainloop_signal(ud->ml,0);
+        pa_mainloop_quit(ud->ml, 0);
         return;
     }
-
-    printf("name=%s, description=%s\n", i->name, i->description);
 
     ud->callback(i->name ? i->name : "", i->description ? i->description : "", ud->userdata);
 }
@@ -713,8 +718,8 @@ void enumctx_state_cb(pa_context *c, void *userdata)
 
     case PA_CONTEXT_READY:
     {
-        //struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
-        //pa_context_get_sink_info_list(c, sink_info_callback, ud);
+        struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
+        pa_context_get_sink_info_list(c, sink_info_callback, ud);
         break;
     }
     case PA_CONTEXT_FAILED:
@@ -730,50 +735,29 @@ void enumctx_state_cb(pa_context *c, void *userdata)
 static void
 pulse_enum_soundcards(void (*callback)(const char *name, const char *desc, void *), void *userdata)
 {
-
     pa_context *enumctx;
+    int ret;
     struct enum_card_userdata ud = {callback, userdata};
 
-    pa_threaded_mainloop *ml = pa_threaded_mainloop_new();
-    pa_mainloop_api *api = pa_threaded_mainloop_get_api(ml);
-    enumctx = pa_context_new(api, "DeaDBeeF Info");
+    pa_mainloop *ml = pa_mainloop_new();
     ud.ml = ml;
+    pa_mainloop_api *api = pa_mainloop_get_api(ml);
+    enumctx = pa_context_new(api, "DeaDBeeF");
 
     pa_context_set_state_callback(enumctx, enumctx_state_cb, &ud);
 
-    if (pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
+    if (ret=pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
     {
-        trace("Cannot connect enumctx\n");
-        goto out_fail_connected;
+        fprintf(stderr, "Pulseaudio enum soundcards error: %s\n", pa_strerror(pa_context_errno(enumctx)));
+        goto fail;
     }
-    pa_threaded_mainloop_start(ml);
-
-    pa_threaded_mainloop_lock(ml); 
-
-    for (;;) {
-        pa_context_state_t state;
-        state = pa_context_get_state(enumctx);
-        if (state == PA_CONTEXT_READY)
-            break;
-        if (!PA_CONTEXT_IS_GOOD(state))
-            goto out_fail_connected;
-        pa_threaded_mainloop_wait(ml);
-    }
-
-    pa_operation *o = pa_context_get_sink_info_list(enumctx, sink_info_callback, &ud);
-
-
-    // pa_threaded_mainloop_lock(ml);
-    // pa_threaded_mainloop_wait(ml);
-    // pa_threaded_mainloop_accept(pa_ml);
-    pa_threaded_mainloop_unlock(ml);
-
-out_fail_connected:
+    pa_mainloop_run(ml, &ret);
 
     pa_context_disconnect(enumctx);
+fail:
     pa_context_unref(enumctx);
-    pa_threaded_mainloop_stop(ml);
-    pa_threaded_mainloop_free(ml);
+
+    pa_mainloop_free(ml);
 }
 
 #define STR_HELPER(x) #x
