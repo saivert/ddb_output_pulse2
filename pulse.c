@@ -211,7 +211,10 @@ static void _pa_sink_input_info_cb(pa_context *c,
 {
     if (i && plugin.has_volume) {
         memcpy(&pa_vol, &i->volume, sizeof(pa_vol));
-        deadbeef->volume_set_amp(pa_sw_volume_to_linear(pa_cvolume_avg(&pa_vol)));
+        pa_volume_t v = pa_cvolume_avg(&pa_vol);
+        if (v <= PA_VOLUME_NORM) {
+            deadbeef->volume_set_amp(pa_sw_volume_to_linear(v));
+        }
     }
 }
 
