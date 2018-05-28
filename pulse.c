@@ -521,10 +521,10 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     buffer_size = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
 
     pa_buffer_attr attr = {
-        .maxlength = -1,
-        .tlength = buffer_size,
-        .prebuf = -1,
-        .minreq = -1,
+        .maxlength = (uint32_t) -1,
+        .tlength = (uint32_t) buffer_size,
+        .prebuf = (uint32_t) -1,
+        .minreq = (uint32_t) -1,
     };
 
     rc = pa_stream_connect_playback(pa_s,
