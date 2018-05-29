@@ -286,13 +286,6 @@ static int _pa_stream_cork(int pause_)
     return _pa_wait_unlock(pa_stream_cork(pa_s, pause_, _pa_stream_success_cb, NULL));
 }
 
-static int _pa_stream_drain(void)
-{
-    pa_threaded_mainloop_lock(pa_ml);
-
-    return _pa_wait_unlock(pa_stream_drain(pa_s, _pa_stream_success_cb, NULL));
-}
-
 static void _pa_ctx_subscription_cb(pa_context *ctx, pa_subscription_event_type_t t,
         uint32_t idx, void *userdata)
 {
@@ -365,7 +358,7 @@ out_fail:
 }
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
-    uint8_t *buffer = NULL;
+    char *buffer = NULL;
     size_t bufsize = requested_bytes;
     int bytesread;
 
@@ -427,7 +420,7 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
         res = pulse_pause ();
     }
 
-    return 0;
+    return res;
 }
 
 static int pulse_free(void)
@@ -450,9 +443,7 @@ static int pulse_free(void)
 static int pulse_set_spec(ddb_waveformat_t *fmt)
 {
     pa_proplist	*pl;
-    int		 rc, i;
-
-
+    int rc;
 
     memcpy (&plugin.fmt, fmt, sizeof (ddb_waveformat_t));
     if (!plugin.fmt.channels) {
