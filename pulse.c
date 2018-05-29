@@ -306,12 +306,11 @@ static void _pa_ctx_subscription_cb(pa_context *ctx, pa_subscription_event_type_
         pa_context_get_sink_input_info(ctx, idx, _pa_sink_input_info_cb, NULL);
 }
 
-static int _pa_create_context(pa_context **ctxout)
+static int _pa_create_context(void)
 {
     pa_mainloop_api	*api;
     pa_proplist	*pl;
     int		 rc;
-    pa_context *ctx;
 
     pl = _create_app_proplist();
 
@@ -320,23 +319,23 @@ static int _pa_create_context(pa_context **ctxout)
 
     pa_threaded_mainloop_lock(pa_ml);
 
-    ctx = pa_context_new_with_proplist(api, "DeaDBeeF Music Player", pl);
-    BUG_ON(!ctx);
+    pa_ctx = pa_context_new_with_proplist(api, "DeaDBeeF Music Player", pl);
+    BUG_ON(!pa_ctx);
     pa_proplist_free(pl);
 
-    pa_context_set_state_callback(ctx, _pa_context_running_cb, NULL);
+    pa_context_set_state_callback(pa_ctx, _pa_context_running_cb, NULL);
 
     // Read serveraddr from config
     char server[1000];
     deadbeef->conf_get_str (CONFSTR_PULSE_SERVERADDR, "", server, sizeof (server));
 
-    rc = pa_context_connect(ctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL);
+    rc = pa_context_connect(pa_ctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL);
     if (rc)
         goto out_fail;
 
     for (;;) {
         pa_context_state_t state;
-        state = pa_context_get_state(ctx);
+        state = pa_context_get_state(pa_ctx);
         if (state == PA_CONTEXT_READY)
             break;
         if (!PA_CONTEXT_IS_GOOD(state))
@@ -344,24 +343,23 @@ static int _pa_create_context(pa_context **ctxout)
         pa_threaded_mainloop_wait(pa_ml);
     }
 
-    pa_context_set_subscribe_callback(ctx, _pa_ctx_subscription_cb, NULL);
-    pa_operation *op = pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT,
+    pa_context_set_subscribe_callback(pa_ctx, _pa_ctx_subscription_cb, NULL);
+    pa_operation *op = pa_context_subscribe(pa_ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT,
             NULL, NULL);
     if (!op)
         goto out_fail_connected;
     pa_operation_unref(op);
 
     pa_threaded_mainloop_unlock(pa_ml);
-    *ctxout = ctx;
 
     return OP_ERROR_SUCCESS;
 
 out_fail_connected:
-    pa_context_disconnect(ctx);
+    pa_context_disconnect(pa_ctx);
 
 out_fail:
-    pa_context_unref(ctx);
-    ctx = NULL;
+    pa_context_unref(pa_ctx);
+    pa_ctx = NULL;
 
     pa_threaded_mainloop_unlock(pa_ml);
 
@@ -504,7 +502,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     };
 
     trace("Pulseaudio: create context\n");
-    rc = _pa_create_context(&pa_ctx);
+    rc = _pa_create_context();
     if (rc)
         return rc;
 
