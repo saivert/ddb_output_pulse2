@@ -742,22 +742,33 @@ pulse_enum_soundcards(void (*callback)(const char *name, const char *desc, void 
     pa_mainloop *ml = pa_mainloop_new();
     ud.ml = ml;
     pa_mainloop_api *api = pa_mainloop_get_api(ml);
-    enumctx = pa_context_new(api, "DeaDBeeF");
+    if (!(enumctx = pa_context_new(api, "DeaDBeeF"))) {
+        fprintf(stderr, "Pulseaudio enum soundcards error: pa_context_new() failed.");
+        goto fail;
+    }
 
     pa_context_set_state_callback(enumctx, enumctx_state_cb, &ud);
 
-    if (ret=pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
+    if (pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
     {
         fprintf(stderr, "Pulseaudio enum soundcards error: %s\n", pa_strerror(pa_context_errno(enumctx)));
         goto fail;
     }
-    pa_mainloop_run(ml, &ret);
+    if (pa_mainloop_run(ml, &ret) < 0) {
+        fprintf(stderr, "Pulseaudio enum soundcards error: pa_mainloop_run() failed.\n");
+    }
 
-    pa_context_disconnect(enumctx);
+    if (enumctx) {
+        pa_context_disconnect(enumctx);
+    }
 fail:
-    pa_context_unref(enumctx);
+    if (enumctx) {
+        pa_context_unref(enumctx);
+    }
 
-    pa_mainloop_free(ml);
+    if (ml) {
+        pa_mainloop_free(ml);
+    }
 }
 
 #define STR_HELPER(x) #x
