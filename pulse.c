@@ -54,6 +54,7 @@ do {					\
 DB_functions_t * deadbeef;
 static DB_output_t plugin;
 
+#define PULSE_PLUGIN_ID "pulseaudio2"
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
@@ -531,7 +532,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     };
 
     deadbeef->conf_lock ();
-    const char *dev = deadbeef->conf_get_str_fast ("alsa_soundcard", "default");
+    const char *dev = deadbeef->conf_get_str_fast (PULSE_PLUGIN_ID "_soundcard", "default");
 
     // TODO: Handle case of configured device no longer existing, fallback to default
 
@@ -785,7 +786,7 @@ static DB_output_t plugin =
     .plugin.version_minor = 1,
     .plugin.flags = DDB_PLUGIN_FLAG_LOGGING,
     .plugin.type = DB_PLUGIN_OUTPUT,
-    .plugin.id = "pulseaudio2",
+    .plugin.id = PULSE_PLUGIN_ID,
     .plugin.name = "PulseAudio output plugin version 2",
     .plugin.descr = "This is a new pulseaudio plugin that uses the asynchronous API",
     .plugin.copyright =
