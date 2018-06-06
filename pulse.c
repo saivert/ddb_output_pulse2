@@ -27,8 +27,11 @@
 #include <stdbool.h>
 #include <deadbeef/deadbeef.h>
 
+#ifdef DBPULSE_DEBUG
 #define trace(...) { fprintf(stdout, __VA_ARGS__); }
-//#define trace(fmt,...)
+#else
+#define trace(fmt,...)
+#endif
 
 #define CMUS_STR(a) #a
 
@@ -132,6 +135,7 @@ static pa_proplist *_create_stream_proplist(void)
     return pl;
 }
 
+#ifdef DBPULSE_DEBUG
 static const char *_pa_context_state_str(pa_context_state_t s)
 {
     switch (s) {
@@ -153,6 +157,7 @@ static const char *_pa_context_state_str(pa_context_state_t s)
 
     return "unknown";
 }
+#endif
 
 static void _pa_context_running_cb(pa_context *c, void *data)
 {
@@ -170,6 +175,7 @@ static void _pa_context_running_cb(pa_context *c, void *data)
     }
 }
 
+#ifdef DBPULSE_DEBUG
 static const char *_pa_stream_state_str(pa_stream_state_t s)
 {
     switch (s) {
@@ -187,6 +193,7 @@ static const char *_pa_stream_state_str(pa_stream_state_t s)
 
     return "unknown";
 }
+#endif
 
 static void _pa_stream_running_cb(pa_stream *s, void *data)
 {
