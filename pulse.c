@@ -748,11 +748,18 @@ pulse_enum_soundcards(void (*callback)(const char *name, const char *desc, void 
 
     pa_context_set_state_callback(enumctx, enumctx_state_cb, &ud);
 
-    if (pa_context_connect(enumctx, NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
+    // Read serveraddr from config
+    const char *server;
+    deadbeef->conf_lock();
+    server = deadbeef->conf_get_str_fast (CONFSTR_PULSE_SERVERADDR, "");
+
+    if (pa_context_connect(enumctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
     {
+        deadbeef->conf_unlock();
         fprintf(stderr, "Pulseaudio enum soundcards error: %s\n", pa_strerror(pa_context_errno(enumctx)));
         goto fail;
     }
+    deadbeef->conf_unlock();
     if (pa_mainloop_run(ml, &ret) < 0) {
         fprintf(stderr, "Pulseaudio enum soundcards error: pa_mainloop_run() failed.\n");
     }
