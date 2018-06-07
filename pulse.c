@@ -33,6 +33,8 @@
 #define trace(fmt,...)
 #endif
 
+#define log_err(...) { deadbeef->log_detailed (&plugin.plugin, DDB_LOG_LAYER_DEFAULT, __VA_ARGS__); }
+
 #define CMUS_STR(a) #a
 
 #define BUG_ON(a)			\
@@ -539,8 +541,10 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
     pa_threaded_mainloop_wait(pa_ml);
 
-    if (pa_stream_get_state(pa_s) != PA_STREAM_READY)
+    if (pa_stream_get_state(pa_s) != PA_STREAM_READY) {
+        log_err("Pulseaudio: Error creating stream. Please check output device.");
         goto out_fail;
+    }
 
     pa_context_get_sink_input_info(pa_ctx, pa_stream_get_index(pa_s),
             _pa_sink_input_info_cb, NULL);
@@ -554,6 +558,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
 out_fail:
     pa_stream_unref(pa_s);
+    pa_s = NULL;
 
     pa_threaded_mainloop_unlock(pa_ml);
 
@@ -562,26 +567,8 @@ out_fail:
     ret_pa_last_error();
 }
 
-static int pulse_play(void)
+static void disconnect_stream(void)
 {
-    trace ("pulse_play\n");
-
-    if (!pa_ml) {
-        pulse_init();
-    }
-
-
-    int ret = pulse_set_spec(&plugin.fmt);
-    return ret;
-}
-
-static int pulse_stop(void)
-{
-    if (state == OUTPUT_STATE_STOPPED) {
-       return 0;
-    }
-
-
     pa_threaded_mainloop_lock(pa_ml);
 
     if (pa_s) {
@@ -597,6 +584,32 @@ static int pulse_stop(void)
     }
 
     pa_threaded_mainloop_unlock(pa_ml);
+}
+
+static int pulse_play(void)
+{
+    trace ("pulse_play\n");
+
+    if (!pa_ml) {
+        pulse_init();
+    }
+
+
+    int ret = pulse_set_spec(&plugin.fmt);
+    if (ret != OP_ERROR_SUCCESS) {
+        disconnect_stream();
+    }
+    return ret;
+}
+
+static int pulse_stop(void)
+{
+    if (state == OUTPUT_STATE_STOPPED) {
+       return 0;
+    }
+
+
+    disconnect_stream();
 
     state = OUTPUT_STATE_STOPPED;
 
@@ -672,6 +685,7 @@ static DB_output_t plugin =
     .plugin.api_vminor = 0,
     .plugin.version_major = 0,
     .plugin.version_minor = 1,
+    .plugin.flags = DDB_PLUGIN_FLAG_LOGGING,
     .plugin.type = DB_PLUGIN_OUTPUT,
     .plugin.id = "pulseaudio2",
     .plugin.name = "PulseAudio output plugin version 2",
