@@ -54,6 +54,7 @@ do {					\
 DB_functions_t * deadbeef;
 static DB_output_t plugin;
 
+#define PULSE_PLUGIN_ID "pulseaudio2"
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
@@ -530,12 +531,19 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         .minreq = (uint32_t) -1,
     };
 
+    deadbeef->conf_lock ();
+    const char *dev = deadbeef->conf_get_str_fast (PULSE_PLUGIN_ID "_soundcard", "default");
+
+    // TODO: Handle case of configured device no longer existing, fallback to default
+
     rc = pa_stream_connect_playback(pa_s,
-                    NULL,
+                    (!strcmp(dev, "default")) ? NULL: dev,
                     &attr,
                     PA_STREAM_NOFLAGS,
                     NULL,
                     NULL);
+    deadbeef->conf_unlock ();
+
     if (rc)
         goto out_fail;
 
@@ -679,6 +687,96 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
     return 0;
 }
 
+struct enum_card_userdata {
+    void (*callback)(const char *name, const char *desc, void *);
+    void *userdata;
+    pa_mainloop *ml;
+};
+
+static void
+sink_info_callback(pa_context *c, const pa_sink_info *i, int eol, void *userdata)  {
+    struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
+
+    if (eol) {
+        pa_mainloop_quit(ud->ml, 0);
+        return;
+    }
+
+    ud->callback(i->name ? i->name : "", i->description ? i->description : "", ud->userdata);
+}
+
+void enumctx_state_cb(pa_context *c, void *userdata)
+{
+    switch (pa_context_get_state(c))
+    {
+    case PA_CONTEXT_UNCONNECTED:
+    case PA_CONTEXT_CONNECTING:
+    case PA_CONTEXT_AUTHORIZING:
+    case PA_CONTEXT_SETTING_NAME:
+        break;
+
+    case PA_CONTEXT_READY:
+    {
+        struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
+        pa_context_get_sink_info_list(c, sink_info_callback, ud);
+        break;
+    }
+    case PA_CONTEXT_FAILED:
+    case PA_CONTEXT_TERMINATED:
+    {
+        break;
+    }
+    default:
+        return;
+    }
+}
+
+static void
+pulse_enum_soundcards(void (*callback)(const char *name, const char *desc, void *), void *userdata)
+{
+    pa_context *enumctx;
+    int ret;
+    struct enum_card_userdata ud = {callback, userdata};
+
+    pa_mainloop *ml = pa_mainloop_new();
+    ud.ml = ml;
+    pa_mainloop_api *api = pa_mainloop_get_api(ml);
+    if (!(enumctx = pa_context_new(api, "DeaDBeeF"))) {
+        fprintf(stderr, "Pulseaudio enum soundcards error: pa_context_new() failed.");
+        goto fail;
+    }
+
+    pa_context_set_state_callback(enumctx, enumctx_state_cb, &ud);
+
+    // Read serveraddr from config
+    const char *server;
+    deadbeef->conf_lock();
+    server = deadbeef->conf_get_str_fast (CONFSTR_PULSE_SERVERADDR, "");
+
+    if (pa_context_connect(enumctx, *server ? server : NULL, PA_CONTEXT_NOFLAGS, NULL) < 0)
+    {
+        deadbeef->conf_unlock();
+        fprintf(stderr, "Pulseaudio enum soundcards error: %s\n", pa_strerror(pa_context_errno(enumctx)));
+        goto fail;
+    }
+    deadbeef->conf_unlock();
+    if (pa_mainloop_run(ml, &ret) < 0) {
+        fprintf(stderr, "Pulseaudio enum soundcards error: pa_mainloop_run() failed.\n");
+    }
+
+    if (enumctx) {
+        pa_context_disconnect(enumctx);
+    }
+fail:
+    if (enumctx) {
+        pa_context_unref(enumctx);
+    }
+
+    if (ml) {
+        pa_mainloop_free(ml);
+    }
+}
+
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
@@ -695,7 +793,7 @@ static DB_output_t plugin =
     .plugin.version_minor = 1,
     .plugin.flags = DDB_PLUGIN_FLAG_LOGGING,
     .plugin.type = DB_PLUGIN_OUTPUT,
-    .plugin.id = "pulseaudio2",
+    .plugin.id = PULSE_PLUGIN_ID,
     .plugin.name = "PulseAudio output plugin version 2",
     .plugin.descr = "This is a new pulseaudio plugin that uses the asynchronous API",
     .plugin.copyright =
@@ -728,5 +826,6 @@ static DB_output_t plugin =
     .pause = pulse_pause,
     .unpause = pulse_unpause,
     .state = pulse_get_state,
+    .enum_soundcards = pulse_enum_soundcards,
     .has_volume = PULSE_DEFAULT_VOLUMECONTROL,
 };
