@@ -618,12 +618,20 @@ static int pulse_stop(void)
 
 static int pulse_pause(void)
 {
+    if (!pa_s) {
+        pulse_play();
+    }
+
     state = OUTPUT_STATE_PAUSED;
-      return _pa_stream_cork(1);
+    return _pa_stream_cork(1);
 }
 
 static int pulse_unpause(void)
 {
+    if (!pa_s) {
+        pulse_play();
+    }
+
     state = OUTPUT_STATE_PLAYING;
     return _pa_stream_cork(0);
 }
