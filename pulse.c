@@ -228,14 +228,18 @@ static void _pa_sink_input_info_cb(pa_context *c,
     }
 }
 
+static void set_volume_value(void)
+{
+    pa_cvolume_set(&pa_vol, pa_ss.channels, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
+}
+
 static int set_volume()
 {
     if (!pa_s || !plugin.has_volume) {
         return -1;
     }
 
-    pa_cvolume_set(&pa_vol, pa_ss.channels, pa_sw_volume_from_linear(deadbeef->volume_get_amp()));
-
+    set_volume_value();
 
     if (!pa_s) {
         return OP_ERROR_SUCCESS;
@@ -531,6 +535,10 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         .minreq = (uint32_t) -1,
     };
 
+    if (plugin.has_volume) {
+        set_volume_value();
+    }
+
     deadbeef->conf_lock ();
     const char *dev = deadbeef->conf_get_str_fast (PULSE_PLUGIN_ID "_soundcard", "default");
 
@@ -540,7 +548,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
                     (!strcmp(dev, "default")) ? NULL: dev,
                     &attr,
                     PA_STREAM_NOFLAGS,
-                    NULL,
+                    plugin.has_volume ? &pa_vol : NULL,
                     NULL);
     deadbeef->conf_unlock ();
 
