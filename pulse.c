@@ -35,12 +35,13 @@
 
 #define log_err(...) { deadbeef->log_detailed (&plugin.plugin, DDB_LOG_LAYER_DEFAULT, __VA_ARGS__); }
 
-#define CMUS_STR(a) #a
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
 #define BUG_ON(a)			\
 do {					\
     if (unlikely(a))		\
-        trace("%s\n", CMUS_STR(a));	\
+        trace("%s\n", STR_HELPER(a));	\
 } while (0)
 
 #define OP_ERROR_SUCCESS 0
@@ -785,8 +786,6 @@ fail:
     }
 }
 
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
 
 static const char settings_dlg[] =
     "property \"PulseAudio server (leave empty for default)\" entry " CONFSTR_PULSE_SERVERADDR " \"\";\n"
