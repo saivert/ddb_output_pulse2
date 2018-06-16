@@ -59,7 +59,7 @@ static DB_output_t plugin;
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
 #define PULSE_DEFAULT_VOLUMECONTROL 0
-#define PULSE_DEFAULT_BUFFERSIZE 4096
+#define PULSE_DEFAULT_BUFFERSIZE 100
 
 
 
@@ -373,21 +373,30 @@ out_fail:
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
-    size_t bufsize = requested_bytes;
+    size_t buftotal = requested_bytes;
     int bytesread;
+    trace("Pulseaudio: buftotal preloop %zu\n", buftotal);
+    while (buftotal > 0)  {
+        size_t bufsize = buftotal;
+        pa_stream_begin_write(s, (void**) &buffer, &bufsize);
+        trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
 
-    pa_stream_begin_write(s, (void**) &buffer, &bufsize);
-
-    if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
-        memset (buffer, 0, bufsize);
-        bytesread = bufsize;
-    } else {
-        bytesread = deadbeef->streamer_read(buffer, bufsize);
-        if (bytesread < 0) {
-            bytesread = 0;
+        if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
+            memset (buffer, 0, bufsize);
+            bytesread = bufsize;
+        } else {
+            bytesread = deadbeef->streamer_read(buffer, bufsize);
+            if (bytesread < 0) {
+                bytesread = 0;
+            }
         }
+        pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
+
+        buftotal -= bytesread;
+        trace("Pulseaudio: buftotal %zu\n", buftotal);
+        if (buftotal > requested_bytes)
+            buftotal = 0;
     }
-    pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
 }
 
 
@@ -468,8 +477,8 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         plugin.fmt.samplerate = 44100;
         plugin.fmt.channelmask = 3;
     }
-    if (plugin.fmt.samplerate > 192000) {
-        plugin.fmt.samplerate = 192000;
+    if (plugin.fmt.samplerate > PA_RATE_MAX) {
+        plugin.fmt.samplerate = PA_RATE_MAX;
     }
 
     trace ("format %dbit %s %dch %dHz channelmask=%X\n", plugin.fmt.bps, plugin.fmt.is_float ? "float" : "int", plugin.fmt.channels, plugin.fmt.samplerate, plugin.fmt.channelmask);
@@ -526,7 +535,9 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
     pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
     pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
 
-    buffer_size = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
+    int ms = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
+    if (ms < 0) ms = 100;
+    buffer_size = pa_usec_to_bytes(ms * 1000, &pa_ss);
 
     pa_buffer_attr attr = {
         .maxlength = (uint32_t) -1,
@@ -790,7 +801,7 @@ fail:
 
 static const char settings_dlg[] =
     "property \"PulseAudio server (leave empty for default)\" entry " CONFSTR_PULSE_SERVERADDR " \"\";\n"
-    "property \"Preferred buffer size\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n"
+    "property \"Preferred buffer size in ms\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n"
     "property \"Use pulseaudio volume control\" checkbox " CONFSTR_PULSE_VOLUMECONTROL " " STR(PULSE_DEFAULT_VOLUMECONTROL) ";\n";
 
 static DB_output_t plugin =
