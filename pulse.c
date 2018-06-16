@@ -432,7 +432,6 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
         return 0;
     }
 
-    pulse_stop();
     pulse_free ();
     pulse_init ();
     int res = 0;
@@ -450,9 +449,26 @@ static int pulse_free(void)
 {
     trace("pulse_free\n");
 
-    if (pa_s) {
-        pulse_stop();
+    state = OUTPUT_STATE_STOPPED;
+    if (!pa_ml) {
+        return OP_ERROR_SUCCESS;
     }
+
+    pa_threaded_mainloop_lock(pa_ml);
+
+    if (pa_s) {
+        pa_stream_disconnect(pa_s);
+        pa_stream_unref(pa_s);
+        pa_s = NULL;
+    }
+
+    if (pa_ctx) {
+        pa_context_disconnect(pa_ctx);
+        pa_context_unref(pa_ctx);
+        pa_ctx = NULL;
+    }
+
+    pa_threaded_mainloop_unlock(pa_ml);
 
     if (pa_ml) {
         pa_threaded_mainloop_stop(pa_ml);
@@ -594,25 +610,6 @@ out_fail:
     ret_pa_last_error();
 }
 
-static void disconnect_stream(void)
-{
-    pa_threaded_mainloop_lock(pa_ml);
-
-    if (pa_s) {
-        pa_stream_disconnect(pa_s);
-        pa_stream_unref(pa_s);
-        pa_s = NULL;
-    }
-
-    if (pa_ctx) {
-        pa_context_disconnect(pa_ctx);
-        pa_context_unref(pa_ctx);
-        pa_ctx = NULL;
-    }
-
-    pa_threaded_mainloop_unlock(pa_ml);
-}
-
 static int pulse_play(void)
 {
     trace ("pulse_play\n");
@@ -624,21 +621,14 @@ static int pulse_play(void)
 
     int ret = pulse_set_spec(&plugin.fmt);
     if (ret != OP_ERROR_SUCCESS) {
-        disconnect_stream();
+        pulse_free();
     }
     return ret;
 }
 
 static int pulse_stop(void)
 {
-    if (state == OUTPUT_STATE_STOPPED) {
-       return 0;
-    }
-
-
-    disconnect_stream();
-
-    state = OUTPUT_STATE_STOPPED;
+    pulse_free();
 
     return OP_ERROR_SUCCESS;
 }
@@ -674,14 +664,13 @@ static int pulse_get_state(void)
 static int pulse_plugin_start(void)
 {
     mutex = deadbeef->mutex_create();
-    return pulse_init();
+    return 0;
 }
 
 static int pulse_plugin_stop(void)
 {
-    int ret = pulse_free();
     deadbeef->mutex_free(mutex);
-    return ret;
+    return 0;
 }
 
 DB_plugin_t * pulse2_load(DB_functions_t *api)
