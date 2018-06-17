@@ -206,8 +206,10 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
     trace("pulse: stream state has changed to %s\n", _pa_stream_state_str(ss));
 
     switch (ss) {
-    case PA_STREAM_READY:
     case PA_STREAM_FAILED:
+        log_err("Pulseaudio: Stopping playback. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
+        deadbeef->sendmessage(DB_EV_STOP, 0, 0, 0);
+    case PA_STREAM_READY:
     case PA_STREAM_TERMINATED:
         pa_threaded_mainloop_signal(pa_ml, 0);
     default:
