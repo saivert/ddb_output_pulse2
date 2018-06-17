@@ -296,6 +296,12 @@ static int _pa_nowait_unlock(pa_operation *o)
     return OP_ERROR_SUCCESS;
 }
 
+static int _pa_stream_flush(void)
+{
+    pa_threaded_mainloop_lock(pa_ml);
+    return _pa_wait_unlock(pa_stream_flush(pa_s, _pa_stream_success_cb, NULL));
+}
+
 static int _pa_stream_cork(int pause_)
 {
     pa_threaded_mainloop_lock(pa_ml);
@@ -643,6 +649,7 @@ static int pulse_pause(void)
     }
 
     state = OUTPUT_STATE_PAUSED;
+    _pa_stream_flush();
     return _pa_stream_cork(1);
 }
 
