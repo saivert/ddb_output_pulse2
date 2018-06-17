@@ -382,9 +382,9 @@ out_fail:
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
-    size_t buftotal = requested_bytes;
+    ssize_t buftotal = requested_bytes;
     int bytesread;
-    trace("Pulseaudio: buftotal preloop %zu\n", buftotal);
+    trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
     while (buftotal > 0)  {
         size_t bufsize = buftotal;
         pa_stream_begin_write(s, (void**) &buffer, &bufsize);
@@ -402,9 +402,7 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
         pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
 
         buftotal -= bytesread;
-        trace("Pulseaudio: buftotal %zu\n", buftotal);
-        if (buftotal > requested_bytes)
-            buftotal = 0;
+        trace("Pulseaudio: buftotal %zd\n", buftotal);
     }
 }
 
