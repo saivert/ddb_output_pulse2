@@ -372,12 +372,13 @@ out_fail_connected:
     pa_context_disconnect(pa_ctx);
 
 out_fail:
+    log_err("Pulseaudio: Error creating context. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
     pa_context_unref(pa_ctx);
     pa_ctx = NULL;
 
     pa_threaded_mainloop_unlock(pa_ml);
 
-    ret_pa_last_error();
+    return -OP_ERROR_INTERNAL;
 }
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
