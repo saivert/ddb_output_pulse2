@@ -723,6 +723,7 @@ sink_info_callback(pa_context *c, const pa_sink_info *i, int eol, void *userdata
 
 void enumctx_state_cb(pa_context *c, void *userdata)
 {
+    struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
     switch (pa_context_get_state(c))
     {
     case PA_CONTEXT_UNCONNECTED:
@@ -733,13 +734,13 @@ void enumctx_state_cb(pa_context *c, void *userdata)
 
     case PA_CONTEXT_READY:
     {
-        struct enum_card_userdata *ud = (struct enum_card_userdata *)userdata;
         pa_context_get_sink_info_list(c, sink_info_callback, ud);
         break;
     }
     case PA_CONTEXT_FAILED:
     case PA_CONTEXT_TERMINATED:
     {
+        pa_mainloop_quit(ud->ml, 0);
         break;
     }
     default:
