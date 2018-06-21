@@ -239,22 +239,23 @@ static void set_volume_value(void)
 static int set_volume()
 {
     if (!pa_s || !plugin.has_volume) {
-        return -1;
+        return -OP_ERROR_INTERNAL;
     }
 
     set_volume_value();
 
-    if (!pa_s) {
-        return OP_ERROR_SUCCESS;
-    } else {
-        pa_threaded_mainloop_lock(pa_ml);
-
-        return _pa_nowait_unlock(pa_context_set_sink_input_volume(pa_ctx,
-                                          pa_stream_get_index(pa_s),
-                                          &pa_vol,
-                                          NULL,
-                                          NULL));
+    pa_threaded_mainloop_lock(pa_ml);
+    uint32_t idx = pa_stream_get_index(pa_s);
+    if (idx == PA_INVALID_INDEX) {
+        pa_threaded_mainloop_unlock(pa_ml);
+        return -OP_ERROR_INTERNAL;
     }
+    return _pa_nowait_unlock(pa_context_set_sink_input_volume(pa_ctx,
+                            idx,
+                            &pa_vol,
+                            NULL,
+                            NULL));
+
 }
 
 static void _pa_stream_success_cb(pa_stream *s, int success, void *data)
