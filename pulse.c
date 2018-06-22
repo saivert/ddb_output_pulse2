@@ -59,8 +59,10 @@ static DB_output_t plugin;
 #define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
 #define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
 #define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
+#define CONFSTR_PULSE_PAUSEONCORK "pulse.pauseoncork"
 #define PULSE_DEFAULT_VOLUMECONTROL 0
 #define PULSE_DEFAULT_BUFFERSIZE 100
+#define PULSE_DEFAULT_PAUSEONCORK 0
 
 
 
@@ -68,6 +70,7 @@ static ddb_waveformat_t requested_fmt;
 static int state=OUTPUT_STATE_STOPPED;
 static uintptr_t mutex;
 static int buffer_size;
+static int cork_requested;
 
 static int pulse_init();
 
@@ -382,6 +385,27 @@ out_fail:
     return -OP_ERROR_INTERNAL;
 }
 
+static void
+stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
+{
+    if (!pa_s || !deadbeef->conf_get_int (CONFSTR_PULSE_PAUSEONCORK, PULSE_DEFAULT_PAUSEONCORK)) {
+        return;
+    }
+
+    if (!strcmp(name, PA_STREAM_EVENT_REQUEST_CORK) && state != OUTPUT_STATE_PAUSED) {
+        cork_requested = 1;
+        pa_stream_flush(pa_s, NULL, NULL);
+        pa_stream_cork(pa_s, 1, NULL, NULL);
+        state = OUTPUT_STATE_PAUSED;
+        deadbeef->sendmessage(DB_EV_PAUSED, 0, 1, 0);
+    } else if (!strcmp(name, PA_STREAM_EVENT_REQUEST_UNCORK) && cork_requested) {
+        cork_requested = 0;
+        pa_stream_cork(pa_s, 0, NULL, NULL);
+        state = OUTPUT_STATE_PLAYING;
+        deadbeef->sendmessage(DB_EV_PAUSED, 0, 0, 0);
+    }
+}
+
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
     ssize_t buftotal = requested_bytes;
@@ -559,6 +583,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
     pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
     pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
+    pa_stream_set_event_callback(pa_s, stream_event_cb, NULL);
 
     int ms = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
     if (ms < 0) ms = 100;
@@ -660,6 +685,7 @@ static int pulse_unpause(void)
     }
 
     state = OUTPUT_STATE_PLAYING;
+    cork_requested=0;
     return _pa_stream_cork(0);
 }
 
@@ -800,7 +826,8 @@ fail:
 static const char settings_dlg[] =
     "property \"PulseAudio server (leave empty for default)\" entry " CONFSTR_PULSE_SERVERADDR " \"\";\n"
     "property \"Preferred buffer size in ms\" entry " CONFSTR_PULSE_BUFFERSIZE " " STR(PULSE_DEFAULT_BUFFERSIZE) ";\n"
-    "property \"Use pulseaudio volume control\" checkbox " CONFSTR_PULSE_VOLUMECONTROL " " STR(PULSE_DEFAULT_VOLUMECONTROL) ";\n";
+    "property \"Use pulseaudio volume control\" checkbox " CONFSTR_PULSE_VOLUMECONTROL " " STR(PULSE_DEFAULT_VOLUMECONTROL) ";\n"
+    "property \"Pause instead of mute when corked (e.g. when receiving calls)\" checkbox " CONFSTR_PULSE_PAUSEONCORK " " STR(PULSE_DEFAULT_PAUSEONCORK) ";\n";
 
 static DB_output_t plugin =
 {
