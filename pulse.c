@@ -125,6 +125,43 @@ static pa_proplist *_create_app_proplist(void)
     return pl;
 }
 
+static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
+{
+    pa_proplist	*pl;
+    int rc, notrackgiven=0;
+
+    pl = pa_proplist_new();
+    BUG_ON(!pl);
+
+    if (!track) {
+        track = deadbeef->streamer_get_playing_track();
+        notrackgiven = 1;
+    }
+    if (track) {
+
+        char buf[1000];
+        const char *artist, *title;
+        artist = deadbeef->pl_find_meta(track, "artist");
+        title = deadbeef->pl_find_meta(track, "title");
+        snprintf (buf, sizeof(buf), "%s - %s", artist, title);
+
+        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_NAME, buf);
+        BUG_ON(rc);
+
+        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_ARTIST, artist);
+        BUG_ON(rc);
+
+        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_TITLE, title);
+        BUG_ON(rc);
+
+        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_FILENAME, deadbeef->pl_find_meta(track, ":URI"));
+        BUG_ON(rc);
+
+        if (notrackgiven) deadbeef->pl_item_unref(track);
+    }
+    return pl;
+}
+
 static pa_proplist *_create_stream_proplist(void)
 {
     pa_proplist	*pl;
@@ -241,7 +278,7 @@ static void set_volume_value(void)
 
 static int set_volume()
 {
-    if (!pa_s || !plugin.has_volume) {
+    if (state == OUTPUT_STATE_STOPPED || !pa_s || !plugin.has_volume) {
         return -OP_ERROR_INTERNAL;
     }
 
@@ -570,11 +607,14 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         return rc;
 
     pl = _create_stream_proplist();
+    pa_proplist *songpl = get_stream_prop_song(NULL);
+    pa_proplist_update(pl, PA_UPDATE_MERGE, songpl);
+    pa_proplist_free(songpl);
 
     pa_threaded_mainloop_lock(pa_ml);
 
     trace("Pulseaudio: create stream\n");
-    pa_s = pa_stream_new_with_proplist(pa_ctx, "playback", &pa_ss, &pa_cmap, pl);
+    pa_s = pa_stream_new_with_proplist(pa_ctx, NULL, &pa_ss, &pa_cmap, pl);
     pa_proplist_free(pl);
     if (!pa_s) {
         pa_threaded_mainloop_unlock(pa_ml);
@@ -715,10 +755,20 @@ DB_plugin_t * pulse2_load(DB_functions_t *api)
     return DB_PLUGIN (&plugin);
 }
 
+static void proplistupdate_success_cb(pa_stream *s, int success, void *userdata)
+{
+    pa_proplist_free(userdata);
+}
 
 static int
 pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
     switch (id) {
+    case DB_EV_SONGSTARTED:
+        if (state == OUTPUT_STATE_PLAYING) {
+            pa_proplist *pl = get_stream_prop_song(((ddb_event_track_t *)ctx)->track);
+            pa_threaded_mainloop_lock(pa_ml);
+            _pa_nowait_unlock(pa_stream_proplist_update (pa_s, PA_UPDATE_REPLACE, pl, proplistupdate_success_cb, pl));
+        }
     case DB_EV_VOLUMECHANGED:
         {
             set_volume();
