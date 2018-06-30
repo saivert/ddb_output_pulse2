@@ -141,6 +141,7 @@ static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
 
         char buf[1000];
         const char *artist, *title;
+        deadbeef->pl_lock();
         artist = deadbeef->pl_find_meta(track, "artist");
         title = deadbeef->pl_find_meta(track, "title");
         snprintf (buf, sizeof(buf), "%s - %s", artist, title);
@@ -157,6 +158,7 @@ static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
         rc = pa_proplist_sets(pl, PA_PROP_MEDIA_FILENAME, deadbeef->pl_find_meta(track, ":URI"));
         BUG_ON(rc);
 
+        deadbeef->pl_unlock();
         if (notrackgiven) deadbeef->pl_item_unref(track);
     }
     return pl;
