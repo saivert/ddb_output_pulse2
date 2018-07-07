@@ -71,6 +71,7 @@ static int state=OUTPUT_STATE_STOPPED;
 static uintptr_t mutex;
 static int buffer_size;
 static int cork_requested;
+static char *tfbytecode;
 
 static int pulse_init();
 
@@ -129,6 +130,11 @@ static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
 {
     pa_proplist	*pl;
     int rc, notrackgiven=0;
+    ddb_tf_context_t ctx = {
+        ._size = sizeof(ddb_tf_context_t),
+        .flags = DDB_TF_CONTEXT_NO_DYNAMIC,
+        .plt = NULL,
+        .iter = PL_MAIN};
 
     pl = pa_proplist_new();
     BUG_ON(!pl);
@@ -141,19 +147,26 @@ static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
 
         char buf[1000];
         const char *artist, *title;
+
+        ctx.it = track;
+        if (deadbeef->tf_eval(&ctx, tfbytecode, buf, sizeof(buf)) > 0) {
+            rc = pa_proplist_sets(pl, PA_PROP_MEDIA_NAME, buf);
+            BUG_ON(rc);
+        }
+
         deadbeef->pl_lock();
         artist = deadbeef->pl_find_meta(track, "artist");
         title = deadbeef->pl_find_meta(track, "title");
-        snprintf (buf, sizeof(buf), "%s - %s", artist, title);
 
-        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_NAME, buf);
-        BUG_ON(rc);
+        if (artist) {
+            rc = pa_proplist_sets(pl, PA_PROP_MEDIA_ARTIST, artist);
+            BUG_ON(rc);
+        }
 
-        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_ARTIST, artist);
-        BUG_ON(rc);
-
-        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_TITLE, title);
-        BUG_ON(rc);
+        if (title) {
+            rc = pa_proplist_sets(pl, PA_PROP_MEDIA_TITLE, title);
+            BUG_ON(rc);
+        }
 
         rc = pa_proplist_sets(pl, PA_PROP_MEDIA_FILENAME, deadbeef->pl_find_meta(track, ":URI"));
         BUG_ON(rc);
@@ -742,12 +755,14 @@ static int pulse_get_state(void)
 static int pulse_plugin_start(void)
 {
     mutex = deadbeef->mutex_create();
+    tfbytecode = deadbeef->tf_compile("[%artist% - ]%title%");
     return 0;
 }
 
 static int pulse_plugin_stop(void)
 {
     deadbeef->mutex_free(mutex);
+    deadbeef->tf_free(tfbytecode);
     return 0;
 }
 
