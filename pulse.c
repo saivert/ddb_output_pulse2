@@ -813,7 +813,19 @@ sink_info_callback(pa_context *c, const pa_sink_info *i, int eol, void *userdata
         return;
     }
 
-    ud->callback(i->name ? i->name : "", i->description ? i->description : "", ud->userdata);
+    // Avoid crazy long descriptions, they grow the GTK dropdown box in deadbeef GUI
+    // Truncate with a middle ellipsis so we catch output port names that are always at the end
+    char buf[256];
+    if (strlen(i->description) > 80) {
+        strncpy (buf, i->description, 38);
+        strcat(buf, "...");
+        strcat (buf, i->description+strlen(i->description)-38);
+        
+    } else {
+        strcpy(buf, i->description ? i->description : "");
+    }
+
+    ud->callback(i->name ? i->name : "", buf, ud->userdata);
 }
 
 void enumctx_state_cb(pa_context *c, void *userdata)
