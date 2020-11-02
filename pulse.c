@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdbool.h>
+#define DDB_API_LEVEL 11
 #include <deadbeef/deadbeef.h>
 
 #ifdef DBPULSE_DEBUG
@@ -67,7 +68,7 @@ static DB_output_t plugin;
 
 
 static ddb_waveformat_t requested_fmt;
-static int state=OUTPUT_STATE_STOPPED;
+static ddb_playback_state_t state;
 static uintptr_t mutex;
 static int buffer_size;
 static int cork_requested;
@@ -296,7 +297,7 @@ static void set_volume_value(void)
 
 static int set_volume()
 {
-    if (state == OUTPUT_STATE_STOPPED || !pa_s || !plugin.has_volume) {
+    if (state == DDB_PLAYBACK_STATE_STOPPED || !pa_s || !plugin.has_volume) {
         return -OP_ERROR_INTERNAL;
     }
 
@@ -447,16 +448,16 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
         return;
     }
 
-    if (!strcmp(name, PA_STREAM_EVENT_REQUEST_CORK) && state != OUTPUT_STATE_PAUSED) {
+    if (!strcmp(name, PA_STREAM_EVENT_REQUEST_CORK) && state != DDB_PLAYBACK_STATE_PAUSED) {
         cork_requested = 1;
         pa_stream_flush(pa_s, NULL, NULL);
         pa_stream_cork(pa_s, 1, NULL, NULL);
-        state = OUTPUT_STATE_PAUSED;
+        state = DDB_PLAYBACK_STATE_PAUSED;
         deadbeef->sendmessage(DB_EV_PAUSED, 0, 1, 0);
     } else if (!strcmp(name, PA_STREAM_EVENT_REQUEST_UNCORK) && cork_requested) {
         cork_requested = 0;
         pa_stream_cork(pa_s, 0, NULL, NULL);
-        state = OUTPUT_STATE_PLAYING;
+        state = DDB_PLAYBACK_STATE_PLAYING;
         deadbeef->sendmessage(DB_EV_PAUSED, 0, 0, 0);
     }
 }
@@ -471,7 +472,7 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
         pa_stream_begin_write(s, (void**) &buffer, &bufsize);
         trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
 
-        if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
+        if (state != DDB_PLAYBACK_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
             memset (buffer, 0, bufsize);
             bytesread = bufsize;
         } else {
@@ -493,7 +494,7 @@ static int pulse_init(void)
     trace ("pulse_init\n");
     int rc;
 
-    state = OUTPUT_STATE_STOPPED;
+    state = DDB_PLAYBACK_STATE_STOPPED;
 
     if (requested_fmt.samplerate != 0) {
         memcpy (&plugin.fmt, &requested_fmt, sizeof (ddb_waveformat_t));
@@ -515,6 +516,7 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
 {
     int st = state;
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
+    trace ("PulseAudio: New format %dbit %s %dch %dHz channelmask=%X\n", requested_fmt.bps, fmt->is_float ? "float" : "int", fmt->channels, fmt->samplerate, fmt->channelmask);
     if (!pa_s
         || !memcmp (fmt, &plugin.fmt, sizeof (ddb_waveformat_t))) {
         return 0;
@@ -523,10 +525,10 @@ static int pulse_setformat (ddb_waveformat_t *fmt)
     pulse_free ();
     pulse_init ();
     int res = 0;
-    if (st == OUTPUT_STATE_PLAYING) {
+    if (st == DDB_PLAYBACK_STATE_PLAYING) {
         res = pulse_play ();
     }
-    else if (st == OUTPUT_STATE_PAUSED) {
+    else if (st == DDB_PLAYBACK_STATE_PAUSED) {
         res = pulse_pause ();
     }
 
@@ -537,7 +539,7 @@ static int pulse_free(void)
 {
     trace("pulse_free\n");
 
-    state = OUTPUT_STATE_STOPPED;
+    state = DDB_PLAYBACK_STATE_STOPPED;
     if (!pa_ml) {
         return OP_ERROR_SUCCESS;
     }
@@ -688,7 +690,7 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
 
 
 
-    state = OUTPUT_STATE_PLAYING;
+    state = DDB_PLAYBACK_STATE_PLAYING;
     return OP_ERROR_SUCCESS;
 
 out_fail:
@@ -727,11 +729,12 @@ static int pulse_stop(void)
 
 static int pulse_pause(void)
 {
+    trace ("pulse_pause\n");
     if (!pa_s) {
         pulse_play();
     }
 
-    state = OUTPUT_STATE_PAUSED;
+    state = DDB_PLAYBACK_STATE_PAUSED;
     _pa_stream_flush();
     return _pa_stream_cork(1);
 }
@@ -742,13 +745,13 @@ static int pulse_unpause(void)
         pulse_play();
     }
 
-    state = OUTPUT_STATE_PLAYING;
+    state = DDB_PLAYBACK_STATE_PLAYING;
     cork_requested=0;
     return _pa_stream_cork(0);
 }
 
 
-static int pulse_get_state(void)
+static ddb_playback_state_t pulse_get_state(void)
 {
     return state;
 }
@@ -784,7 +787,7 @@ static int
 pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
     switch (id) {
     case DB_EV_SONGSTARTED:
-        if (state == OUTPUT_STATE_PLAYING) {
+        if (state == DDB_PLAYBACK_STATE_PLAYING) {
             pa_proplist *pl = get_stream_prop_song(((ddb_event_track_t *)ctx)->track);
             pa_threaded_mainloop_lock(pa_ml);
             _pa_nowait_unlock(pa_stream_proplist_update (pa_s, PA_UPDATE_REPLACE, pl, proplistupdate_success_cb, pl));
