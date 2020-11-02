@@ -173,6 +173,9 @@ static pa_proplist* get_stream_prop_song(DB_playItem_t *track)
 
         deadbeef->pl_unlock();
         if (notrackgiven) deadbeef->pl_item_unref(track);
+    } else {
+        rc = pa_proplist_sets(pl, PA_PROP_MEDIA_NAME, "");
+        BUG_ON(rc);
     }
     return pl;
 }
