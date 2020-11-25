@@ -789,6 +789,7 @@ pulse_message (uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2) {
             pa_threaded_mainloop_lock(pa_ml);
             _pa_nowait_unlock(pa_stream_proplist_update (pa_s, PA_UPDATE_REPLACE, pl, proplistupdate_success_cb, pl));
         }
+        break;
     case DB_EV_VOLUMECHANGED:
         {
             set_volume();
