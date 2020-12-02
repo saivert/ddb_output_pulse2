@@ -18,6 +18,17 @@
 
 
 
+#if ENABLE_NLS
+
+# include <libintl.h>
+#define _(s) gettext(s)
+
+#else
+
+#define _(s) (s)
+
+#endif
+
 #include <pulse/pulseaudio.h>
 
 #include <errno.h>
@@ -266,7 +277,7 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
 
     switch (ss) {
     case PA_STREAM_FAILED:
-        log_err("Pulseaudio: Stopping playback. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
+        log_err(_("Pulseaudio: Stopping playback. Reason: %s"), pa_strerror(pa_context_errno(pa_ctx)));
         deadbeef->sendmessage(DB_EV_STOP, 0, 0, 0);
     case PA_STREAM_READY:
     case PA_STREAM_TERMINATED:
@@ -433,7 +444,7 @@ out_fail_connected:
     pa_context_disconnect(pa_ctx);
 
 out_fail:
-    log_err("Pulseaudio: Error creating context. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
+    log_err(_("Pulseaudio: Error creating context. Reason: %s"), pa_strerror(pa_context_errno(pa_ctx)));
     pa_context_unref(pa_ctx);
     pa_ctx = NULL;
 

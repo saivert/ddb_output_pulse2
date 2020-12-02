@@ -14,6 +14,7 @@ if buildtype.startswith('debug')
 endif
 
 add_project_arguments(debug_cflags, language: 'c')
+add_project_arguments('-DENABLE_NLS', language: 'c')
 
 cc = meson.get_compiler('c')
 if not cc.has_header('deadbeef/deadbeef.h')
@@ -21,6 +22,10 @@ if not cc.has_header('deadbeef/deadbeef.h')
 endif
 
 pulse_dep = dependency('libpulse')
+libintl = cc.find_library('intl', required : false)
 
-shared_library('pulse2', 'pulse.c', dependencies : [pulse_dep], name_prefix: '',
+subdir('po')
+
+shared_library('pulse2', 'pulse.c', dependencies : [pulse_dep, libintl], name_prefix: '',
   install: true, install_dir: 'lib/deadbeef')
+
