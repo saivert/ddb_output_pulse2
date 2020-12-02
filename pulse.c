@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdbool.h>
+#define DDB_API_LEVEL 10
 #include <deadbeef/deadbeef.h>
 
 #ifdef DBPULSE_DEBUG
