@@ -1,6 +1,6 @@
 /*
     PulseAudio output plugin for DeaDBeeF Player
-    Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>
+    Copyright (C) 2015-2020 Nicolai Syvertsen <saivert@saivert.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -915,7 +915,7 @@ static DB_output_t plugin =
 {
     .plugin.api_vmajor = 1,
     .plugin.api_vminor = 0,
-    .plugin.version_major = 0,
+    .plugin.version_major = 1,
     .plugin.version_minor = 1,
     .plugin.flags = DDB_PLUGIN_FLAG_LOGGING,
     .plugin.type = DB_PLUGIN_OUTPUT,
@@ -924,7 +924,7 @@ static DB_output_t plugin =
     .plugin.descr = "This is a new pulseaudio plugin that uses the asynchronous API",
     .plugin.copyright =
         "PulseAudio output plugin for DeaDBeeF Player\n"
-        "Copyright (C) 2015 Nicolai Syvertsen <saivert@saivert.com>\n"
+        "Copyright (C) 2015-2020 Nicolai Syvertsen <saivert@saivert.com>\n"
         "\n"
         "This program is free software; you can redistribute it and/or\n"
         "modify it under the terms of the GNU General Public License\n"
