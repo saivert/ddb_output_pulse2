@@ -721,8 +721,9 @@ static int pulse_play(void)
         pulse_init();
     }
 
-
+    deadbeef->mutex_lock(mutex);
     int ret = pulse_set_spec(&plugin.fmt);
+    deadbeef->mutex_unlock(mutex);
     if (ret != OP_ERROR_SUCCESS) {
         pulse_free();
     }
