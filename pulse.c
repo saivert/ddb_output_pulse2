@@ -71,6 +71,8 @@ static uintptr_t mutex;
 static int buffer_size;
 static int cork_requested;
 static char *tfbytecode;
+static int _setformat_requested;
+static intptr_t _setformat_tid;
 
 static int pulse_init();
 
@@ -460,6 +462,24 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
     }
 }
 
+void _setformat_apply (void *ctx) {
+    deadbeef->mutex_lock(mutex);
+
+    pa_stream_disconnect(pa_s);
+    pa_stream_unref(pa_s);
+    pa_s = NULL;
+
+    pulse_set_spec(&requested_fmt);
+
+    deadbeef->mutex_unlock(mutex);
+
+    _setformat_requested = 0;
+
+    deadbeef->thread_detach (_setformat_tid);
+    _setformat_tid = 0;
+    trace("Pulseaudio: _setformat_apply end\n");
+}
+
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
     ssize_t buftotal = requested_bytes;
@@ -467,10 +487,11 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
     trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
     while (buftotal > 0)  {
         size_t bufsize = buftotal;
+
         pa_stream_begin_write(s, (void**) &buffer, &bufsize);
         trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
 
-        if (state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
+        if (_setformat_requested || state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
             memset (buffer, 0, bufsize);
             bytesread = bufsize;
         } else {
@@ -483,6 +504,10 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
 
         buftotal -= bytesread;
         trace("Pulseaudio: buftotal %zd\n", buftotal);
+    }
+
+    if (_setformat_requested && !_setformat_tid) {
+        _setformat_tid = deadbeef->thread_start (_setformat_apply, NULL);
     }
 }
 
@@ -512,24 +537,11 @@ static int pulse_init(void)
 
 static int pulse_setformat (ddb_waveformat_t *fmt)
 {
-    int st = state;
+    deadbeef->mutex_lock(mutex);
+    _setformat_requested = 1;
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
-    if (!pa_s
-        || !memcmp (fmt, &plugin.fmt, sizeof (ddb_waveformat_t))) {
-        return 0;
-    }
-
-    pulse_free ();
-    pulse_init ();
-    int res = 0;
-    if (st == OUTPUT_STATE_PLAYING) {
-        res = pulse_play ();
-    }
-    else if (st == OUTPUT_STATE_PAUSED) {
-        res = pulse_pause ();
-    }
-
-    return res;
+    deadbeef->mutex_unlock(mutex);
+    return 0;
 }
 
 static int pulse_free(void)
