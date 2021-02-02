@@ -72,7 +72,12 @@ static int buffer_size;
 static int cork_requested;
 static char *tfbytecode;
 static int _setformat_requested;
-static intptr_t _setformat_tid;
+
+
+static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata);
+static int _setformat_state;
+static void _setformat_apply (pa_mainloop_api *m, void *userdata);
+
 
 static int pulse_init();
 
@@ -88,7 +93,6 @@ static int pulse_pause();
 
 static int pulse_unpause();
 
-static int pulse_set_spec(ddb_waveformat_t *fmt);
 
 
 static pa_threaded_mainloop	*pa_ml;
@@ -230,6 +234,10 @@ static void _pa_context_running_cb(pa_context *c, void *data)
 
     switch (cs) {
     case PA_CONTEXT_READY:
+        _setformat_state = 1;
+        _setformat_apply(NULL, NULL);
+        state = OUTPUT_STATE_PLAYING;
+        //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
     case PA_CONTEXT_FAILED:
     case PA_CONTEXT_TERMINATED:
         pa_threaded_mainloop_signal(pa_ml, 0);
@@ -269,7 +277,16 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
         log_err("Pulseaudio: Stopping playback. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
         deadbeef->sendmessage(DB_EV_STOP, 0, 0, 0);
     case PA_STREAM_READY:
+        if (_setformat_requested && _setformat_state == 1) {
+            _setformat_state = 2;
+            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
+            _setformat_apply(NULL, NULL);
+        }
     case PA_STREAM_TERMINATED:
+        if (_setformat_requested) {
+            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
+            _setformat_apply(NULL, NULL);
+        }
         pa_threaded_mainloop_signal(pa_ml, 0);
     default:
         return;
@@ -462,34 +479,141 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
     }
 }
 
-void _setformat_apply (void *ctx) {
-    deadbeef->mutex_lock(mutex);
+static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
 
-    pa_stream_disconnect(pa_s);
-    pa_stream_unref(pa_s);
-    pa_s = NULL;
+    // deadbeef->mutex_lock(mutex);
 
-    pulse_set_spec(&requested_fmt);
+    if (_setformat_state == 0) {
+        _setformat_state = 1;
+        pa_stream_disconnect(pa_s);
+    } else if (_setformat_state == 1) {
+        if (pa_s) pa_stream_unref(pa_s);
+        pa_s = NULL;
 
-    deadbeef->mutex_unlock(mutex);
+        pa_proplist	*pl;
+        int rc;
 
-    _setformat_requested = 0;
+        memcpy (&plugin.fmt, &requested_fmt, sizeof (ddb_waveformat_t));
+        if (!plugin.fmt.channels) {
+            // generic format
+            plugin.fmt.bps = 16;
+            plugin.fmt.is_float = 0;
+            plugin.fmt.channels = 2;
+            plugin.fmt.samplerate = 44100;
+            plugin.fmt.channelmask = 3;
+        }
+        if (plugin.fmt.samplerate > PA_RATE_MAX) {
+            plugin.fmt.samplerate = PA_RATE_MAX;
+        }
 
-    deadbeef->thread_detach (_setformat_tid);
-    _setformat_tid = 0;
-    trace("Pulseaudio: _setformat_apply end\n");
+        trace ("format %dbit %s %dch %dHz channelmask=%X\n", plugin.fmt.bps, plugin.fmt.is_float ? "float" : "int", plugin.fmt.channels, plugin.fmt.samplerate, plugin.fmt.channelmask);
+
+        pa_ss.channels = plugin.fmt.channels;
+        // Try to auto-configure the channel map, see <pulse/channelmap.h> for details
+
+        pa_channel_map_init_extend(&pa_cmap, pa_ss.channels, PA_CHANNEL_MAP_WAVEEX);
+        trace ("pulse: channels: %d\n", pa_ss.channels);
+
+        // Read samplerate from config
+        pa_ss.rate = plugin.fmt.samplerate;
+        trace ("pulse: samplerate: %d\n", pa_ss.rate);
+
+        switch (plugin.fmt.bps) {
+        case 8:
+            pa_ss.format = PA_SAMPLE_U8;
+            break;
+        case 16:
+            pa_ss.format = PA_SAMPLE_S16LE;
+            break;
+        case 24:
+            pa_ss.format = PA_SAMPLE_S24LE;
+            break;
+        case 32:
+            if (plugin.fmt.is_float) {
+                pa_ss.format = PA_SAMPLE_FLOAT32LE;
+            }
+            else {
+                pa_ss.format = PA_SAMPLE_S32LE;
+            }
+            break;
+        default:
+            pa_ss.format = PA_SAMPLE_S16LE;
+        };
+
+        pl = _create_stream_proplist();
+        pa_proplist *songpl = get_stream_prop_song(NULL);
+        pa_proplist_update(pl, PA_UPDATE_MERGE, songpl);
+        pa_proplist_free(songpl);
+
+
+        trace("Pulseaudio: create stream\n");
+        pa_s = pa_stream_new_with_proplist(pa_ctx, NULL, &pa_ss, &pa_cmap, pl);
+        pa_proplist_free(pl);
+        if (!pa_s) {
+            goto out_fail;
+        }
+
+        pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
+        pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
+        pa_stream_set_event_callback(pa_s, stream_event_cb, NULL);
+
+        int ms = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
+        if (ms < 0) ms = 100;
+        buffer_size = pa_usec_to_bytes(ms * 1000, &pa_ss);
+
+        pa_buffer_attr attr = {
+            .maxlength = (uint32_t) -1,
+            .tlength = (uint32_t) buffer_size,
+            .prebuf = (uint32_t) -1,
+            .minreq = (uint32_t) -1,
+        };
+
+        if (plugin.has_volume) {
+            set_volume_value();
+        }
+
+        deadbeef->conf_lock ();
+        const char *dev = deadbeef->conf_get_str_fast (PULSE_PLUGIN_ID "_soundcard", "default");
+
+        // TODO: Handle case of configured device no longer existing, fallback to default
+
+        rc = pa_stream_connect_playback(pa_s,
+                        (!strcmp(dev, "default")) ? NULL: dev,
+                        &attr,
+                        PA_STREAM_NOFLAGS,
+                        plugin.has_volume ? &pa_vol : NULL,
+                        NULL);
+        deadbeef->conf_unlock ();
+
+        if (rc)
+            trace("Pulseaudio: Error connecting stream!\n");
+
+    } else if  (_setformat_state == 2) {
+
+        pa_context_get_sink_input_info(pa_ctx, pa_stream_get_index(pa_s),
+                _pa_sink_input_info_cb, NULL);
+
+        _setformat_requested = 0;
+
+    }
+out_fail:
+
+
+    // deadbeef->mutex_unlock(mutex);
+
+    trace("Pulseaudio: _setformat_apply end state = %d\n", _setformat_state);
 }
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
     ssize_t buftotal = requested_bytes;
     int bytesread;
-    trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
+    // trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
     while (buftotal > 0)  {
         size_t bufsize = buftotal;
 
         pa_stream_begin_write(s, (void**) &buffer, &bufsize);
-        trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
+        // trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
 
         if (_setformat_requested || state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
             memset (buffer, 0, bufsize);
@@ -503,11 +627,11 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
         pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
 
         buftotal -= bytesread;
-        trace("Pulseaudio: buftotal %zd\n", buftotal);
+        // trace("Pulseaudio: buftotal %zd\n", buftotal);
     }
 
-    if (_setformat_requested && !_setformat_tid) {
-        _setformat_tid = deadbeef->thread_start (_setformat_apply, NULL);
+    if (_setformat_requested && _setformat_state == 0 ) {
+        pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
     }
 }
 
@@ -537,8 +661,10 @@ static int pulse_init(void)
 
 static int pulse_setformat (ddb_waveformat_t *fmt)
 {
+    trace("Pulseaudio: setformat called!\n");
     deadbeef->mutex_lock(mutex);
     _setformat_requested = 1;
+    _setformat_state = 0;
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
     deadbeef->mutex_unlock(mutex);
     return 0;
@@ -578,141 +704,6 @@ static int pulse_free(void)
     return OP_ERROR_SUCCESS;
 }
 
-static int pulse_set_spec(ddb_waveformat_t *fmt)
-{
-    pa_proplist	*pl;
-    int rc;
-
-    memcpy (&plugin.fmt, fmt, sizeof (ddb_waveformat_t));
-    if (!plugin.fmt.channels) {
-        // generic format
-        plugin.fmt.bps = 16;
-        plugin.fmt.is_float = 0;
-        plugin.fmt.channels = 2;
-        plugin.fmt.samplerate = 44100;
-        plugin.fmt.channelmask = 3;
-    }
-    if (plugin.fmt.samplerate > PA_RATE_MAX) {
-        plugin.fmt.samplerate = PA_RATE_MAX;
-    }
-
-    trace ("format %dbit %s %dch %dHz channelmask=%X\n", plugin.fmt.bps, plugin.fmt.is_float ? "float" : "int", plugin.fmt.channels, plugin.fmt.samplerate, plugin.fmt.channelmask);
-
-    pa_ss.channels = plugin.fmt.channels;
-    // Try to auto-configure the channel map, see <pulse/channelmap.h> for details
-
-    pa_channel_map_init_extend(&pa_cmap, pa_ss.channels, PA_CHANNEL_MAP_WAVEEX);
-    trace ("pulse: channels: %d\n", pa_ss.channels);
-
-    // Read samplerate from config
-    pa_ss.rate = plugin.fmt.samplerate;
-    trace ("pulse: samplerate: %d\n", pa_ss.rate);
-
-    switch (plugin.fmt.bps) {
-    case 8:
-        pa_ss.format = PA_SAMPLE_U8;
-        break;
-    case 16:
-        pa_ss.format = PA_SAMPLE_S16LE;
-        break;
-    case 24:
-        pa_ss.format = PA_SAMPLE_S24LE;
-        break;
-    case 32:
-        if (plugin.fmt.is_float) {
-            pa_ss.format = PA_SAMPLE_FLOAT32LE;
-        }
-        else {
-            pa_ss.format = PA_SAMPLE_S32LE;
-        }
-        break;
-    default:
-        return -1;
-    };
-
-    trace("Pulseaudio: create context\n");
-    rc = _pa_create_context();
-    if (rc)
-        return rc;
-
-    pl = _create_stream_proplist();
-    pa_proplist *songpl = get_stream_prop_song(NULL);
-    pa_proplist_update(pl, PA_UPDATE_MERGE, songpl);
-    pa_proplist_free(songpl);
-
-    pa_threaded_mainloop_lock(pa_ml);
-
-    trace("Pulseaudio: create stream\n");
-    pa_s = pa_stream_new_with_proplist(pa_ctx, NULL, &pa_ss, &pa_cmap, pl);
-    pa_proplist_free(pl);
-    if (!pa_s) {
-        pa_threaded_mainloop_unlock(pa_ml);
-        ret_pa_last_error();
-    }
-
-    pa_stream_set_state_callback(pa_s, _pa_stream_running_cb, NULL);
-    pa_stream_set_write_callback(pa_s, stream_request_cb, NULL);
-    pa_stream_set_event_callback(pa_s, stream_event_cb, NULL);
-
-    int ms = deadbeef->conf_get_int(CONFSTR_PULSE_BUFFERSIZE, PULSE_DEFAULT_BUFFERSIZE);
-    if (ms < 0) ms = 100;
-    buffer_size = pa_usec_to_bytes(ms * 1000, &pa_ss);
-
-    pa_buffer_attr attr = {
-        .maxlength = (uint32_t) -1,
-        .tlength = (uint32_t) buffer_size,
-        .prebuf = (uint32_t) -1,
-        .minreq = (uint32_t) -1,
-    };
-
-    if (plugin.has_volume) {
-        set_volume_value();
-    }
-
-    deadbeef->conf_lock ();
-    const char *dev = deadbeef->conf_get_str_fast (PULSE_PLUGIN_ID "_soundcard", "default");
-
-    // TODO: Handle case of configured device no longer existing, fallback to default
-
-    rc = pa_stream_connect_playback(pa_s,
-                    (!strcmp(dev, "default")) ? NULL: dev,
-                    &attr,
-                    PA_STREAM_NOFLAGS,
-                    plugin.has_volume ? &pa_vol : NULL,
-                    NULL);
-    deadbeef->conf_unlock ();
-
-    if (rc)
-        goto out_fail;
-
-    pa_threaded_mainloop_wait(pa_ml);
-
-    if (pa_stream_get_state(pa_s) != PA_STREAM_READY) {
-        log_err("Pulseaudio: Error creating stream. Please check output device.");
-        goto out_fail;
-    }
-
-    pa_context_get_sink_input_info(pa_ctx, pa_stream_get_index(pa_s),
-            _pa_sink_input_info_cb, NULL);
-
-    pa_threaded_mainloop_unlock(pa_ml);
-
-
-
-    state = OUTPUT_STATE_PLAYING;
-    return OP_ERROR_SUCCESS;
-
-out_fail:
-    pa_stream_unref(pa_s);
-    pa_s = NULL;
-
-    pa_threaded_mainloop_unlock(pa_ml);
-
-
-
-    ret_pa_last_error();
-}
-
 static int pulse_play(void)
 {
     trace ("pulse_play\n");
@@ -720,10 +711,18 @@ static int pulse_play(void)
     if (!pa_ml) {
         pulse_init();
     }
+    int ret = OP_ERROR_SUCCESS;
 
-    deadbeef->mutex_lock(mutex);
-    int ret = pulse_set_spec(&plugin.fmt);
-    deadbeef->mutex_unlock(mutex);
+    //ret = pulse_set_spec(&plugin.fmt);
+    // _setformat_requested=0;
+    // _setformat_state=1;
+    memcpy (&requested_fmt, &plugin.fmt, sizeof (ddb_waveformat_t));
+    if (!pa_ctx) _pa_create_context();
+    // pa_threaded_mainloop_lock(pa_ml);
+    // _setformat_apply(NULL, NULL);
+    // pa_threaded_mainloop_unlock(pa_ml);
+
+
     if (ret != OP_ERROR_SUCCESS) {
         pulse_free();
     }
