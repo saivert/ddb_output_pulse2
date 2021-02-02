@@ -236,7 +236,6 @@ static void _pa_context_running_cb(pa_context *c, void *data)
     case PA_CONTEXT_READY:
         _setformat_state = 1;
         _setformat_apply(NULL, NULL);
-        state = OUTPUT_STATE_PLAYING;
         //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
     case PA_CONTEXT_FAILED:
     case PA_CONTEXT_TERMINATED:
@@ -276,18 +275,23 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
     case PA_STREAM_FAILED:
         log_err("Pulseaudio: Stopping playback. Reason: %s", pa_strerror(pa_context_errno(pa_ctx)));
         deadbeef->sendmessage(DB_EV_STOP, 0, 0, 0);
+        break;
     case PA_STREAM_READY:
         if (_setformat_requested && _setformat_state == 1) {
             _setformat_state = 2;
             //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
             _setformat_apply(NULL, NULL);
         }
+        if (state == OUTPUT_STATE_STOPPED) {
+            state = OUTPUT_STATE_PLAYING;
+        }
+        break;
     case PA_STREAM_TERMINATED:
         if (_setformat_requested) {
             //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
             _setformat_apply(NULL, NULL);
         }
-        pa_threaded_mainloop_signal(pa_ml, 0);
+        //pa_threaded_mainloop_signal(pa_ml, 0);
     default:
         return;
     }
@@ -481,7 +485,7 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
 
 static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
 
-    // deadbeef->mutex_lock(mutex);
+    deadbeef->mutex_lock(mutex);
 
     if (_setformat_state == 0) {
         _setformat_state = 1;
@@ -537,8 +541,12 @@ static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
             }
             break;
         default:
-            pa_ss.format = PA_SAMPLE_S16LE;
+            pa_ss.format = PA_SAMPLE_INVALID;
         };
+
+        // Simulate stream create failure by uncommenting next line:
+        //pa_ss.format = PA_SAMPLE_INVALID;
+
 
         pl = _create_stream_proplist();
         pa_proplist *songpl = get_stream_prop_song(NULL);
@@ -550,6 +558,9 @@ static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
         pa_s = pa_stream_new_with_proplist(pa_ctx, NULL, &pa_ss, &pa_cmap, pl);
         pa_proplist_free(pl);
         if (!pa_s) {
+            log_err("Pulseaudio: Error creating stream! Check sample format, etc...\n");
+            state = OUTPUT_STATE_STOPPED;
+            //pa_threaded_mainloop_signal(pa_ml, 0);
             goto out_fail;
         }
 
@@ -599,7 +610,7 @@ static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
 out_fail:
 
 
-    // deadbeef->mutex_unlock(mutex);
+    deadbeef->mutex_unlock(mutex);
 
     trace("Pulseaudio: _setformat_apply end state = %d\n", _setformat_state);
 }
@@ -711,17 +722,13 @@ static int pulse_play(void)
     if (!pa_ml) {
         pulse_init();
     }
-    int ret = OP_ERROR_SUCCESS;
+    int ret;
 
-    //ret = pulse_set_spec(&plugin.fmt);
-    // _setformat_requested=0;
-    // _setformat_state=1;
     memcpy (&requested_fmt, &plugin.fmt, sizeof (ddb_waveformat_t));
-    if (!pa_ctx) _pa_create_context();
-    // pa_threaded_mainloop_lock(pa_ml);
-    // _setformat_apply(NULL, NULL);
-    // pa_threaded_mainloop_unlock(pa_ml);
+    ret = _pa_create_context(); // Should only return once context and stream is ready/failed
 
+    trace("Pulseaudio: after context create, pa_s = %p\n", pa_s);
+    if (!pa_s) ret = OP_ERROR_INTERNAL;
 
     if (ret != OP_ERROR_SUCCESS) {
         pulse_free();
