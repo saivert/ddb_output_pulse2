@@ -282,6 +282,7 @@ static void _pa_sink_input_info_cb(pa_context *c,
                    void *data)
 {
     if (i && plugin.has_volume) {
+        if (pa_cvolume_equal(&pa_vol, &i->volume)) return;
         memcpy(&pa_vol, &i->volume, sizeof(pa_vol));
         pa_volume_t v = pa_cvolume_avg(&pa_vol);
         if (v <= PA_VOLUME_NORM) {
