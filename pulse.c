@@ -466,6 +466,7 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
 static void _setformat_apply (void *ctx) {
     deadbeef->mutex_lock(mutex);
 
+    state = OUTPUT_STATE_STOPPED;
     pa_stream_disconnect(pa_s);
     pa_stream_unref(pa_s);
     pa_s = NULL;
