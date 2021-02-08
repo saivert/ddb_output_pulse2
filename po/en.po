@@ -1,14 +1,13 @@
 # English translations for ddb_output_pulse2 package.
-# Copyright (C) 2020 THE ddb_output_pulse2'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the ddb_output_pulse2 package.
-# Automatically generated, 2020.
+# This file is put in the public domain.
+# Automatically generated, 2021.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: ddb_output_pulse2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2020-12-02 23:57+0100\n"
-"PO-Revision-Date: 2020-12-02 23:14+0100\n"
+"POT-Creation-Date: 2021-02-08 12:47+0100\n"
+"PO-Revision-Date: 2021-02-08 12:40+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
 "Language: en\n"
@@ -17,12 +16,12 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: pulse.c:279
+#: pulse.c:276
 #, c-format
 msgid "Pulseaudio: Stopping playback. Reason: %s"
 msgstr "Pulseaudio: Stopping playback. Reason: %s"
 
-#: pulse.c:445
-#, fuzzy, c-format
+#: pulse.c:443
+#, c-format
 msgid "Pulseaudio: Error creating context. Reason: %s"
-msgstr "Pulseaudio: Stopping playback. Reason: %s"
+msgstr "Pulseaudio: Error creating context. Reason: %s"

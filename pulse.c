@@ -16,17 +16,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
+#include "config.h"
 
 #if ENABLE_NLS
-
-# include <libintl.h>
-#define _(s) gettext(s)
-
+#   include <libintl.h>
+#   define _(s) dgettext(GETTEXT_PACKAGE, s)
 #else
-
-#define _(s) (s)
-
+#   define _(s) (s)
 #endif
 
 #include <pulse/pulseaudio.h>
@@ -781,6 +777,10 @@ static int pulse_get_state(void)
 
 static int pulse_plugin_start(void)
 {
+#ifdef ENABLE_NLS
+    bindtextdomain (GETTEXT_PACKAGE, "/usr/local/share/locale");
+    bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8");
+#endif
     mutex = deadbeef->mutex_create();
     tfbytecode = deadbeef->tf_compile("[%artist% - ]%title%");
     return 0;

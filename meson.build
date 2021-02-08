@@ -6,6 +6,7 @@ project('ddb_output_pulse2', 'c',
         ],
         license: 'GPLv2.0+')
 
+config_data = configuration_data()
 
 debug_cflags = []
 buildtype = get_option('buildtype')
@@ -24,7 +25,12 @@ endif
 pulse_dep = dependency('libpulse')
 libintl = cc.find_library('intl', required : false)
 
-subdir('po')
+if get_option('nls') == true
+  subdir('po')
+endif
+
+configure_file(output: 'config.h',
+               configuration: config_data)
 
 shared_library('pulse2', 'pulse.c', dependencies : [pulse_dep, libintl], name_prefix: '',
   install: true, install_dir: 'lib/deadbeef')
