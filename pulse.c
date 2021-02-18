@@ -467,9 +467,18 @@ static void _setformat_apply (void *ctx) {
     deadbeef->mutex_lock(mutex);
 
     state = OUTPUT_STATE_STOPPED;
+
+    pa_threaded_mainloop_lock(pa_ml);
     pa_stream_disconnect(pa_s);
+
+    while (pa_stream_get_state(pa_s) != PA_STREAM_TERMINATED) {
+        pa_threaded_mainloop_wait(pa_ml);
+    }
+
     pa_stream_unref(pa_s);
     pa_s = NULL;
+
+    pa_threaded_mainloop_unlock(pa_ml);
 
     pulse_set_spec(&requested_fmt);
 
@@ -486,11 +495,11 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
     char *buffer = NULL;
     ssize_t buftotal = requested_bytes;
     int bytesread;
-    trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
+    // trace("Pulseaudio: buftotal preloop %zd\n", buftotal);
     while (buftotal > 0)  {
         size_t bufsize = buftotal;
         pa_stream_begin_write(s, (void**) &buffer, &bufsize);
-        trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
+        // trace("Pulseaudio: bufsize begin write %zu\n", bufsize);
 
         if (_setformat_requested || state != OUTPUT_STATE_PLAYING || !deadbeef->streamer_ok_to_read (-1)) {
             memset (buffer, 0, bufsize);
@@ -504,7 +513,7 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
         pa_stream_write(s, buffer, bytesread, NULL, 0LL, PA_SEEK_RELATIVE);
 
         buftotal -= bytesread;
-        trace("Pulseaudio: buftotal %zd\n", buftotal);
+        // trace("Pulseaudio: buftotal %zd\n", buftotal);
     }
 
     if (_setformat_requested && !_setformat_tid) {
@@ -533,13 +542,21 @@ static int pulse_init(void)
         ret_pa_error(rc);
     }
 
+    trace("Pulseaudio: create context\n");
+    if (_pa_create_context() != OP_ERROR_SUCCESS) {
+        pa_threaded_mainloop_free(pa_ml);
+        pa_ml = NULL;
+        return OP_ERROR_INTERNAL;
+    }
+
     return OP_ERROR_SUCCESS;
 }
 
 static int pulse_setformat (ddb_waveformat_t *fmt)
 {
     deadbeef->mutex_lock(mutex);
-    _setformat_requested = 1;
+    if (state != OUTPUT_STATE_STOPPED)
+        _setformat_requested = 1;
     memcpy (&requested_fmt, fmt, sizeof (ddb_waveformat_t));
     deadbeef->mutex_unlock(mutex);
     return 0;
@@ -631,10 +648,6 @@ static int pulse_set_spec(ddb_waveformat_t *fmt)
         return -1;
     };
 
-    trace("Pulseaudio: create context\n");
-    rc = _pa_create_context();
-    if (rc)
-        return rc;
 
     pl = _create_stream_proplist();
     pa_proplist *songpl = get_stream_prop_song(NULL);
