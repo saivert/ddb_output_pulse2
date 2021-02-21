@@ -76,7 +76,8 @@ static int _setformat_requested;
 
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata);
 static int _setformat_state;
-static void _setformat_apply (pa_mainloop_api *m, void *userdata);
+static void _setformat_apply ();
+static void _setformat_apply_once (pa_mainloop_api *m, void *userdata);
 
 
 static int pulse_init();
@@ -235,8 +236,8 @@ static void _pa_context_running_cb(pa_context *c, void *data)
     switch (cs) {
     case PA_CONTEXT_READY:
         _setformat_state = 1;
-        _setformat_apply(NULL, NULL);
-        //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
+        _setformat_apply();
+        //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply_once, NULL );
     case PA_CONTEXT_FAILED:
     case PA_CONTEXT_TERMINATED:
         pa_threaded_mainloop_signal(pa_ml, 0);
@@ -277,10 +278,10 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
         deadbeef->sendmessage(DB_EV_STOP, 0, 0, 0);
         break;
     case PA_STREAM_READY:
-        if (_setformat_requested && _setformat_state == 1) {
+        if (_setformat_requested /* && _setformat_state == 1 */) {
             _setformat_state = 2;
-            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
-            _setformat_apply(NULL, NULL);
+            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply_once, NULL );
+            _setformat_apply();
         }
         if (state == OUTPUT_STATE_STOPPED) {
             state = OUTPUT_STATE_PLAYING;
@@ -288,8 +289,8 @@ static void _pa_stream_running_cb(pa_stream *s, void *data)
         break;
     case PA_STREAM_TERMINATED:
         if (_setformat_requested) {
-            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
-            _setformat_apply(NULL, NULL);
+            //pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply_once, NULL );
+            _setformat_apply();
         }
         //pa_threaded_mainloop_signal(pa_ml, 0);
     default:
@@ -484,7 +485,7 @@ stream_event_cb(pa_stream *p, const char *name, pa_proplist *pl, void *userdata)
     }
 }
 
-static void _setformat_apply (pa_mainloop_api *m, void *userdata) {
+static void _setformat_apply() {
 
     deadbeef->mutex_lock(mutex);
 
@@ -616,6 +617,11 @@ out_fail:
     trace("Pulseaudio: _setformat_apply end state = %d\n", _setformat_state);
 }
 
+static void _setformat_apply_once (pa_mainloop_api *m, void *userdata) {
+    _setformat_apply();
+}
+
+
 static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userdata) {
     char *buffer = NULL;
     ssize_t buftotal = requested_bytes;
@@ -643,7 +649,7 @@ static void stream_request_cb(pa_stream *s, size_t requested_bytes, void *userda
     }
 
     if (_setformat_requested && _setformat_state == 0 ) {
-        pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply, NULL );
+        pa_mainloop_api_once(pa_threaded_mainloop_get_api(pa_ml), _setformat_apply_once, NULL );
     }
 }
 
