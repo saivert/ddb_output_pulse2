@@ -966,7 +966,7 @@ static DB_output_t plugin =
         "You should have received a copy of the GNU General Public License\n"
         "along with this program; if not, write to the Free Software\n"
         "Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.\n",
-    .plugin.website = "http://saivert.com",
+    .plugin.website = "https://github.com/saivert/ddb_output_pulse2",
     .plugin.start = pulse_plugin_start,
     .plugin.stop = pulse_plugin_stop,
     .plugin.configdialog = settings_dlg,
