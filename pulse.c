@@ -732,7 +732,9 @@ static int pulse_play(void)
     trace ("pulse_play\n");
 
     if (!pa_ml) {
-        pulse_init();
+        if (pulse_init() != OP_ERROR_SUCCESS) {
+            return -OP_ERROR_INTERNAL;
+        }
     }
 
     deadbeef->mutex_lock(mutex);
