@@ -55,10 +55,10 @@ DB_functions_t * deadbeef;
 static DB_output_t plugin;
 
 #define PULSE_PLUGIN_ID "pulseaudio2"
-#define CONFSTR_PULSE_SERVERADDR "pulse.serveraddr"
-#define CONFSTR_PULSE_BUFFERSIZE "pulse.buffersize"
-#define CONFSTR_PULSE_VOLUMECONTROL "pulse.volumecontrol"
-#define CONFSTR_PULSE_PAUSEONCORK "pulse.pauseoncork"
+#define CONFSTR_PULSE_SERVERADDR "pulse2.serveraddr"
+#define CONFSTR_PULSE_BUFFERSIZE "pulse2.buffersize"
+#define CONFSTR_PULSE_VOLUMECONTROL "pulse2.volumecontrol"
+#define CONFSTR_PULSE_PAUSEONCORK "pulse2.pauseoncork"
 #define PULSE_DEFAULT_VOLUMECONTROL 0
 #define PULSE_DEFAULT_BUFFERSIZE 100
 #define PULSE_DEFAULT_PAUSEONCORK 0
